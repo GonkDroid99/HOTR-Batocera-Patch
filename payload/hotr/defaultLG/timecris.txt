@@ -1,0 +1,31 @@
+Players
+1
+P1
+Recoil & Reload
+Ammo_Value 0
+Recoil 1
+Recoil_R2S 0
+Recoil_Value 0
+[Options]
+Skip_Auto_LED
+End Options
+[States]
+:mame_start
+*All
+>Open_COM
+:mame_stop
+*All
+>Close_COM
+[Signals]
+:cpuled0
+:cpuled1
+:cpuled2
+:cpuled3
+:cpuled4
+:cpuled5
+:cpuled6
+:cpuled7
+:mcuout0
+:mcuout1
+*P1
+#Recoil

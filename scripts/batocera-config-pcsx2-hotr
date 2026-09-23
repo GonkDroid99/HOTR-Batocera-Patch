@@ -1,0 +1,4 @@
+#!/bin/bash
+BIN=/userdata/system/hotr/emulators/pcsx2/PCSX2-hotr.AppImage
+[ -x "$BIN" ] || { echo "PCSX2 HOTR not installed"; exit 1; }
+exec "$BIN"

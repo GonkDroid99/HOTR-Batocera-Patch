@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=DuckStation HOTR Configuration
+Exec=/usr/bin/batocera-config-duckstation-hotr
+Terminal=false
+Categories=Game;

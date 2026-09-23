@@ -1,0 +1,2 @@
+Runtime release assembly places Hook_of_the_Reaper-x86_64.AppImage here as
+`hook-of-the-reaper`. Do not commit the AppImage to normal Git.

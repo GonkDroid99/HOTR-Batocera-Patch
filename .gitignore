@@ -1,0 +1,21 @@
+# Large binary payloads are distributed from the private/public GitHub
+# prerelease tag "binaries-v1" and must never be committed to normal Git.
+payload/emulators/duckstation/duckstation-qt
+payload/emulators/duckstation/duckstation-lightgun-qt
+payload/emulators/pcsx2/PCSX2-hotr.AppImage
+payload/hotr/Hook_of_the_Reaper-x86_64.AppImage
+payload/hotr/hook-of-the-reaper
+
+# Locally staged/downloaded release binaries.
+.binary-staging/
+binaries/
+
+# Generated release packages.
+dist/
+
+# Common build/editor noise.
+__pycache__/
+*.pyc
+.DS_Store
+.vscode/
+.idea/

@@ -1,0 +1,48 @@
+# Hook of the Reaper — USB device access rules
+# All devices get MODE="0666" so the app can run without root.
+
+# Alien USB Light Gun (VID 0x04B4, PID 0x6870)
+SUBSYSTEM=="usb",    ATTRS{idVendor}=="04b4", ATTRS{idProduct}=="6870", MODE="0666", GROUP="uucp"
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="04b4", ATTRS{idProduct}=="6870", MODE="0666", GROUP="uucp"
+
+# AimTrak Light Gun (VID 0xD209, PID 0x1601)
+SUBSYSTEM=="usb",    ATTRS{idVendor}=="d209", ATTRS{idProduct}=="1601", MODE="0666", GROUP="uucp"
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="d209", ATTRS{idProduct}=="1601", MODE="0666", GROUP="uucp"
+
+# Custom USB Light Gun (VID 0x1B4F, PID 0x9206)
+SUBSYSTEM=="usb",    ATTRS{idVendor}=="1b4f", ATTRS{idProduct}=="9206", MODE="0666", GROUP="uucp"
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1b4f", ATTRS{idProduct}=="9206", MODE="0666", GROUP="uucp"
+
+# ALED Strip Controller (VID 0xCAFE, PID 0x6920)
+SUBSYSTEM=="usb",    ATTRS{idVendor}=="cafe", ATTRS{idProduct}=="6920", MODE="0666", GROUP="uucp"
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="cafe", ATTRS{idProduct}=="6920", MODE="0666", GROUP="uucp"
+
+# 3A-3H Retro Shooter 1 (VID 0x0483, PID 0x5750)
+# Uses 'option' GSM serial driver (non-compliant CDC ACM descriptor).
+# Stable symlinks /dev/rs3reaper-N-gun1 ... /dev/rs3reaper-N-gun8 created by product name.
+SUBSYSTEM=="usb",    ATTRS{idVendor}=="0483", ATTRS{idProduct}=="5750", MODE="0666", GROUP="uucp"
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="5750", MODE="0666", GROUP="uucp"
+SUBSYSTEM=="tty",    ATTRS{idVendor}=="0483", ATTRS{idProduct}=="5750", MODE="0666", GROUP="uucp"
+SUBSYSTEM=="input",  ATTRS{idVendor}=="0483", ATTRS{idProduct}=="5750", MODE="0666", GROUP="input"
+ACTION=="add", SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="5750", \
+    RUN+="/bin/sh -c 'modprobe -q option; echo 0483 5750 > /sys/bus/usb-serial/drivers/option1/new_id'"
+SUBSYSTEM=="tty", ENV{ID_SERIAL}=="3AGAME_3A-3H_Retro_Shooter_1_*", ENV{ID_USB_INTERFACE_NUM}=="02", SYMLINK+="hotr/rs3reaper-gun1"
+SUBSYSTEM=="tty", ENV{ID_SERIAL}=="3AGAME_3A-3H_Retro_Shooter_2_*", ENV{ID_USB_INTERFACE_NUM}=="02", SYMLINK+="hotr/rs3reaper-gun2"
+SUBSYSTEM=="tty", ENV{ID_SERIAL}=="3AGAME_3A-3H_Retro_Shooter_3_*", ENV{ID_USB_INTERFACE_NUM}=="02", SYMLINK+="hotr/rs3reaper-gun3"
+SUBSYSTEM=="tty", ENV{ID_SERIAL}=="3AGAME_3A-3H_Retro_Shooter_4_*", ENV{ID_USB_INTERFACE_NUM}=="02", SYMLINK+="hotr/rs3reaper-gun4"
+
+# 3A-3H Retro Shooter 2 (VID 0x0483, PID 0x5751)
+# Uses 'option' GSM serial driver (non-compliant CDC ACM descriptor).
+SUBSYSTEM=="usb",    ATTRS{idVendor}=="0483", ATTRS{idProduct}=="5751", MODE="0666", GROUP="uucp"
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="5751", MODE="0666", GROUP="uucp"
+SUBSYSTEM=="tty",    ATTRS{idVendor}=="0483", ATTRS{idProduct}=="5751", MODE="0666", GROUP="uucp"
+SUBSYSTEM=="input",  ATTRS{idVendor}=="0483", ATTRS{idProduct}=="5751", MODE="0666", GROUP="input"
+ACTION=="add", SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="5751", \
+    RUN+="/bin/sh -c 'modprobe -q option; echo 0483 5751 > /sys/bus/usb-serial/drivers/option1/new_id'"
+
+# Arduino-based light guns: JB Gun4IR, Fusion, Blamcon, OpenFire, X-Gunner, Xenas, MX24, etc.
+# These appear as ttyACM devices via the standard cdc_acm driver.
+# We can't match by VID:PID (Arduino VIDs are shared across many devices) so grant access
+# to all ttyACM nodes. /dev/serial/by-path/ symlinks (stable per physical USB port) are
+# what HOTR should save in its config — they survive reboots unchanged.
+SUBSYSTEM=="tty", KERNEL=="ttyACM*", MODE="0666", GROUP="uucp"

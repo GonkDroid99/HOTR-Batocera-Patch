@@ -1,0 +1,2 @@
+Put PCSX2-hotr.AppImage here before making a bundled release.
+MameOutputSender is already included in this directory and must stay beside the emulator.

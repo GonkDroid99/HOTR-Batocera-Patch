@@ -1,0 +1,4 @@
+#!/bin/bash
+BIN=/userdata/system/hotr/emulators/duckstation/duckstation-lightgun-qt
+[ -x "$BIN" ] || { echo "DuckStation HOTR not installed"; exit 1; }
+exec "$BIN"

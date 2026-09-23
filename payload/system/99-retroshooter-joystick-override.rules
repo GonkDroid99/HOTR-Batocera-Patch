@@ -1,0 +1,7 @@
+# Re-enable joystick enumeration for RS3 guns in gamepad/SDL mode.
+# retroshooter-guns sets ID_INPUT_JOYSTICK=0 on all RS3 event nodes to merge
+# them into the virtual Retro Shooter Lightgun mouse device. This overrides
+# that suppression for the gamepad-mode event node so DuckStation LightGun
+# Edition can enumerate the RS3 via SDL when HOTR switches guns to gamepad mode.
+# Filename sorts after 99-retroshooter-guns.rules so this override wins (j > g).
+SUBSYSTEM=="input", KERNEL=="event*", ACTION=="add", ATTRS{name}=="3AGAME 3A-3H Retro Shooter [1-4]", ENV{ID_INPUT_JOYSTICK}="1"

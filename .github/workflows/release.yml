@@ -1,0 +1,122 @@
+name: Build HOTR Batocera release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Normal release tag to create/update (example: v1.0.0)"
+        required: true
+        default: "v1.0.0"
+      binary_tag:
+        description: "Prerelease containing the large binary payloads"
+        required: true
+        default: "binaries-v1"
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      BINARY_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.binary_tag || 'binaries-v1' }}
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+
+    steps:
+      - name: Check out installer source
+        uses: actions/checkout@v4
+
+      - name: Download large binary payload prerelease
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/hotr-binaries"
+          gh release download "$BINARY_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --dir "$RUNNER_TEMP/hotr-binaries" \
+            --pattern 'duckstation-qt.tar.gz' \
+            --pattern 'PCSX2-hotr.AppImage' \
+            --pattern 'Hook_of_the_Reaper-x86_64.AppImage' \
+            --pattern 'SHA256SUMS'
+          ls -lh "$RUNNER_TEMP/hotr-binaries"
+
+      - name: Verify binary payload checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/hotr-binaries"
+          sha256sum -c SHA256SUMS
+
+      - name: Assemble runtime payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf payload/emulators/duckstation
+          mkdir -p payload/emulators/duckstation payload/emulators/pcsx2 payload/hotr
+
+          tar -xzf "$RUNNER_TEMP/hotr-binaries/duckstation-qt.tar.gz" \
+            -C payload/emulators/duckstation
+
+          DUCK_BIN=""
+          for candidate in duckstation-qt duckstation-lightgun-qt; do
+            if [ -f "payload/emulators/duckstation/$candidate" ]; then
+              DUCK_BIN="payload/emulators/duckstation/$candidate"
+              break
+            fi
+          done
+          [ -n "$DUCK_BIN" ] || {
+            echo "ERROR: duckstation-qt.tar.gz must contain duckstation-qt or duckstation-lightgun-qt at its archive root." >&2
+            exit 3
+          }
+          chmod +x "$DUCK_BIN"
+
+          install -m 0755 "$RUNNER_TEMP/hotr-binaries/PCSX2-hotr.AppImage" \
+            payload/emulators/pcsx2/PCSX2-hotr.AppImage
+
+          # install.sh expects the HOTR executable at this normalized path.
+          install -m 0755 "$RUNNER_TEMP/hotr-binaries/Hook_of_the_Reaper-x86_64.AppImage" \
+            payload/hotr/hook-of-the-reaper
+
+          # MameOutputSender belongs beside each emulator.
+          test -f payload/emulators/duckstation/MameOutputSender || cp -a reference/bin/duckstation-MameOutputSender payload/emulators/duckstation/MameOutputSender 2>/dev/null || true
+          test -x payload/emulators/duckstation/MameOutputSender || chmod +x payload/emulators/duckstation/MameOutputSender 2>/dev/null || true
+          test -f payload/emulators/pcsx2/MameOutputSender || cp -a reference/bin/pcsx2-MameOutputSender payload/emulators/pcsx2/MameOutputSender 2>/dev/null || true
+          test -x payload/emulators/pcsx2/MameOutputSender || chmod +x payload/emulators/pcsx2/MameOutputSender 2>/dev/null || true
+
+          test -x payload/emulators/duckstation/MameOutputSender || { echo 'ERROR: DuckStation MameOutputSender is missing.' >&2; exit 4; }
+          test -x payload/emulators/pcsx2/MameOutputSender || { echo 'ERROR: PCSX2 MameOutputSender is missing.' >&2; exit 4; }
+
+          find payload/emulators -maxdepth 2 -type f -printf '%p %k KB\n' | sort
+          ls -lh payload/hotr/hook-of-the-reaper
+
+      - name: Build self-contained installer ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x build-release.sh
+          ./build-release.sh
+          sha256sum dist/HOTR-Batocera43-x86_64.zip > dist/HOTR-Batocera43-x86_64.zip.sha256
+          ls -lh dist/
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: HOTR-Batocera43-x86_64
+          path: |
+            dist/HOTR-Batocera43-x86_64.zip
+            dist/HOTR-Batocera43-x86_64.zip.sha256
+
+      - name: Create/update normal GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: HOTR Batocera ${{ env.RELEASE_TAG }}
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            dist/HOTR-Batocera43-x86_64.zip
+            dist/HOTR-Batocera43-x86_64.zip.sha256

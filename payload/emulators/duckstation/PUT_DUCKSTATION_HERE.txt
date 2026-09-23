@@ -1,0 +1,4 @@
+Put your Batocera x86_64 DuckStation HOTR build here before making a bundled release.
+Accepted binary names: duckstation-qt or duckstation-lightgun-qt.
+Keep resources/ and translations/ beside the binary if your build includes them.
+MameOutputSender is already included in this directory and must stay beside the emulator.

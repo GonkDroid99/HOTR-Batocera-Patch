@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=Hook of the Reaper
+Exec=/usr/bin/batocera-config-hotr
+Terminal=false
+Categories=Game;

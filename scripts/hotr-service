@@ -1,0 +1,27 @@
+#!/bin/bash
+# Batocera user service for Hook of the Reaper.
+set -u
+ROOT=/userdata/system/hotr
+DAEMON="$ROOT/hook-of-the-reaper/hook-of-the-reaper"
+AUTOCONFIG="$ROOT/bin/hotr-autoconfig.py"
+PIDFILE=/var/run/hook-of-the-reaper.pid
+LOGFILE=/userdata/system/logs/hook-of-the-reaper.log
+DATADIR="$ROOT/hook-of-the-reaper/data"
+LGDIR="$ROOT/hook-of-the-reaper/defaultLG"
+mkdir -p /userdata/system/logs
+start_hotr() {
+  export DISPLAY=:0.0 HOME=/userdata/system XDG_CONFIG_HOME=/userdata/system/configs
+  [ -x "$DAEMON" ] || { echo "HOTR executable missing: $DAEMON" >>"$LOGFILE"; return 1; }
+  [ -x "$AUTOCONFIG" ] && python3 "$AUTOCONFIG" >>"$LOGFILE" 2>&1 || true
+  if ! pgrep -f "$DAEMON" >/dev/null 2>&1; then
+    (cd "$ROOT/hook-of-the-reaper" && HOTR_DATA_DIR="$DATADIR" nohup "$DAEMON" --no-ui >>"$LOGFILE" 2>&1 & echo $! >"$PIDFILE")
+  fi
+  [ -x "$ROOT/scripts/custom-boot.sh" ] && "$ROOT/scripts/custom-boot.sh" >>"$LOGFILE" 2>&1 || true
+}
+stop_hotr() {
+  [ -f "$PIDFILE" ] && kill "$(cat "$PIDFILE")" 2>/dev/null || true
+  pkill -f "$DAEMON" 2>/dev/null || true
+  rm -f "$PIDFILE"
+  [ -x "$ROOT/scripts/custom-stop.sh" ] && "$ROOT/scripts/custom-stop.sh" >>"$LOGFILE" 2>&1 || true
+}
+case "${1:-}" in start) start_hotr ;; stop) stop_hotr ;; restart|reload) stop_hotr; sleep 1; start_hotr ;; status) pgrep -af "$DAEMON" || exit 1 ;; *) echo "Usage: $0 {start|stop|restart|status}"; exit 2;; esac

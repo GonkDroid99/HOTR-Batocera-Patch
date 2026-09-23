@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=PCSX2 HOTR Configuration
+Exec=/usr/bin/batocera-config-pcsx2-hotr
+Terminal=false
+Categories=Game;

@@ -1,0 +1,10 @@
+#!/bin/bash
+set -euo pipefail
+SYSTEM="${1:?system missing}"; CONTROLLERS="${2:-}"; ROM="${3:?rom missing}"
+case "$SYSTEM" in
+  psx-hotr) EMULATOR="duckstation"; CORE="duckstation-lightgun" ;;
+  ps2-hotr) EMULATOR="pcsx2-lightgun"; CORE="pcsx2-lightgun" ;;
+  *) echo "HOTR: unknown system: $SYSTEM" >&2; exit 2 ;;
+esac
+# Run as a module. Directly executing emulatorlauncher.py can break its relative imports.
+exec python3 -m configgen.emulatorlauncher "$CONTROLLERS" -system "$SYSTEM" -rom "$ROM" -emulator "$EMULATOR" -core "$CORE"
