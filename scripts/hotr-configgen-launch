@@ -1,10 +1,32 @@
 #!/bin/bash
 set -euo pipefail
-SYSTEM="${1:?system missing}"; CONTROLLERS="${2:-}"; ROM="${3:?rom missing}"
+
+# Usage from es_systems_hotr.cfg:
+#   hotr-configgen-launch psx-hotr %CONTROLLERSCONFIG% -rom %ROM%
+#   hotr-configgen-launch ps2-hotr %CONTROLLERSCONFIG% -rom %ROM%
+#
+# IMPORTANT: %CONTROLLERSCONFIG% expands to MANY arguments. Do not capture it
+# into a single shell variable; pass the remaining arguments through verbatim.
+SYSTEM="${1:?HOTR system name missing}"
+shift
+
 case "$SYSTEM" in
-  psx-hotr) EMULATOR="duckstation"; CORE="duckstation-lightgun" ;;
-  ps2-hotr) EMULATOR="pcsx2-lightgun"; CORE="pcsx2-lightgun" ;;
-  *) echo "HOTR: unknown system: $SYSTEM" >&2; exit 2 ;;
+  psx-hotr)
+    EMULATOR="duckstation"
+    CORE="duckstation-lightgun"
+    ;;
+  ps2-hotr)
+    EMULATOR="pcsx2-lightgun"
+    CORE="pcsx2-lightgun"
+    ;;
+  *)
+    echo "HOTR: unknown system: $SYSTEM" >&2
+    exit 2
+    ;;
 esac
-# Run as a module. Directly executing emulatorlauncher.py can break its relative imports.
-exec python3 -m configgen.emulatorlauncher "$CONTROLLERS" -system "$SYSTEM" -rom "$ROM" -emulator "$EMULATOR" -core "$CORE"
+
+exec python3 -m configgen.emulatorlauncher \
+  "$@" \
+  -system "$SYSTEM" \
+  -emulator "$EMULATOR" \
+  -core "$CORE"
