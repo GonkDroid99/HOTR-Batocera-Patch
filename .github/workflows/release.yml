@@ -38,8 +38,8 @@ jobs:
           gh release download "$BINARY_TAG" \
             --repo "$GITHUB_REPOSITORY" \
             --dir "$RUNNER_TEMP/hotr-binaries" \
-            --pattern 'duckstation-qt.tar.gz' \
-            --pattern 'PCSX2-hotr.AppImage' \
+            --pattern 'duckstation-hotr.tar.gz' \
+            --pattern 'pcsx2-hotr.tar.gz' \
             --pattern 'Hook_of_the_Reaper-x86_64.AppImage' \
             --pattern 'SHA256SUMS'
           ls -lh "$RUNNER_TEMP/hotr-binaries"
@@ -58,24 +58,14 @@ jobs:
           rm -rf payload/emulators/duckstation
           mkdir -p payload/emulators/duckstation payload/emulators/pcsx2 payload/hotr
 
-          tar -xzf "$RUNNER_TEMP/hotr-binaries/duckstation-qt.tar.gz" \
+          tar -xzf "$RUNNER_TEMP/hotr-binaries/duckstation-hotr.tar.gz" \
             -C payload/emulators/duckstation
 
-          DUCK_BIN=""
-          for candidate in duckstation-qt duckstation-lightgun-qt; do
-            if [ -f "payload/emulators/duckstation/$candidate" ]; then
-              DUCK_BIN="payload/emulators/duckstation/$candidate"
-              break
-            fi
-          done
-          [ -n "$DUCK_BIN" ] || {
-            echo "ERROR: duckstation-qt.tar.gz must contain duckstation-qt or duckstation-lightgun-qt at its archive root." >&2
-            exit 3
-          }
-          chmod +x "$DUCK_BIN"
+          test -x payload/emulators/duckstation/duckstation-lightgun-qt || { echo "ERROR: DuckStation archive missing duckstation-lightgun-qt" >&2; exit 3; }
 
-          install -m 0755 "$RUNNER_TEMP/hotr-binaries/PCSX2-hotr.AppImage" \
-            payload/emulators/pcsx2/PCSX2-hotr.AppImage
+          rm -rf payload/emulators/pcsx2/*
+          tar -xzf "$RUNNER_TEMP/hotr-binaries/pcsx2-hotr.tar.gz" -C payload/emulators/pcsx2
+          test -x payload/emulators/pcsx2/pcsx2-lightgun-qt || { echo "ERROR: PCSX2 archive missing pcsx2-lightgun-qt" >&2; exit 3; }
 
           # install.sh expects the HOTR executable at this normalized path.
           install -m 0755 "$RUNNER_TEMP/hotr-binaries/Hook_of_the_Reaper-x86_64.AppImage" \

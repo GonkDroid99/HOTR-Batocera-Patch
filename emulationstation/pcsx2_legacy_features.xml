@@ -1,0 +1,190 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<legacy features="powermode tdp videomode bezel bezel_stretch hud hud_corner bezel.tattoo bezel.tattoo_corner bezel.tattoo_file bezel.resize_tattoo use_guns use_wheels wheel_rotation wheel_deadzone wheel_midzone cheevos">
+  <feature name="SHADER SET" value="pcsx2_shaderset" group="RENDERING" description="">
+    <choice name="scanlines" value="1" />
+    <choice name="diagonal filter" value="2" />
+    <choice name="triangular filter" value="3" />
+    <choice name="wave filter" value="4" />
+    <choice name="lottes crt" value="5" />
+    <choice name="4xrgss" value="6" />
+    <choice name="nxagss" value="7" />
+  </feature>
+  <feature name="OSD MESSAGES" value="pcsx2_osd_messages" group="DISPLAY" description="Display on screen information like savestate, config warning etc...">
+    <choice name="Enabled (Default)" value="true" />
+    <choice name="Disabled" value="false" />
+  </feature>
+  <feature name="OSD MESSAGES POSITION" value="pcsx2_osd_messages_position" group="DISPLAY" description="Choose the on-screen position for system messages.">
+    <choice name="Top Left" value="1" />
+    <choice name="Top Center (Default)" value="2" />
+    <choice name="Top Right" value="3" />
+    <choice name="Center Left" value="4" />
+    <choice name="Center" value="5" />
+    <choice name="Center Right" value="6" />
+    <choice name="Bottom Left" value="7" />
+    <choice name="Bottom Center" value="8" />
+    <choice name="Bottom Right" value="9" />
+  </feature>
+  <feature name="OSD PERFORMANCE POSITION" value="pcsx2_osd_performance_position" group="DISPLAY" description="Choose the on-screen position for performance metrics (FPS, CPU usage, etc.).">
+    <choice name="None (Default)" value="0" />
+    <choice name="Top Left" value="1" />
+    <choice name="Top Center" value="2" />
+    <choice name="Top Right" value="3" />
+    <choice name="Center Left" value="4" />
+    <choice name="Center" value="5" />
+    <choice name="Center Right" value="6" />
+    <choice name="Bottom Left" value="7" />
+    <choice name="Bottom Center" value="8" />
+    <choice name="Bottom Right" value="9" />
+  </feature>
+  <feature name="GAME ASPECT RATIO" value="pcsx2_ratio" group="DISPLAY" description="Force the game to render in this aspect ratio. Not all systems support all ratios.">
+    <choice name="Fit to Window / Fullscreen" value="Stretch" />
+    <choice name="Auto Standard (4:3 interlaced / 3:2 progressive)" value="Auto 4:3/3:2" />
+    <choice name="Standard (4:3)" value="243" />
+    <choice name="Widescreen (16:9)" value="969" />
+  </feature>
+  <feature name="FMV ASPECT RATIO" value="pcsx2_fmv_ratio" group="DISPLAY" description="Adjusts Full Motion Video movies aspect ratio.">
+    <choice name="Off (Default)" value="off" />
+    <choice name="Auto Standard (4:3 interlaced / 3:2 progressive)" value="Auto 4:3/3:2" />
+    <choice name="Standard (4:3)" value="243" />
+    <choice name="Widescreen (16:9)" value="969" />
+  </feature>
+  <feature name="DEINTERLACING" value="pcsx2_deinterlacing" group="DISPLAY" description="FMV movie deinterlacing.">
+    <choice name="None" value="1" />
+    <choice name="Weave (Top Field First)" value="2" />
+    <choice name="Weave (Bottom Field First)" value="3" />
+    <choice name="Bob (Top Field First)" value="4" />
+    <choice name="Bob (Bottom Field First)" value="5" />
+    <choice name="Blend (Top Field First)" value="6" />
+    <choice name="Blend (Bottom Field First)" value="7" />
+    <choice name="Adaptive (Top Field First)" value="8" />
+    <choice name="Adaptive (Bottom Field First)" value="9" />
+  </feature>
+  <feature name="BILINEAR FILTERING" value="pcsx2_bilinear_filtering" group="DISPLAY" description="Smooths the overall picture as it is displayed on the screen. Corrects positioning between pixels.">
+    <choice name="None" value="0" />
+    <choice name="Bilinear (Smooth)" value="1" />
+    <choice name="Bilinear (Sharp)" value="2" />
+  </feature>
+  <feature name="ENABLE WIDESCREEN PATCHES" value="pcsx2_EnableWideScreenPatches" group="DISPLAY" description="Enhancement. Only works with a 16/9 ratio and bezels disabled.">
+    <choice name="Disabled" value="false" />
+    <choice name="Enabled" value="true" />
+  </feature>
+  <feature name="ANTI-BLUR" value="pcsx2_blur" group="DISPLAY" description="Enable to improve bluriness.">
+    <choice name="Disabled" value="false" />
+    <choice name="Enabled" value="true" />
+  </feature>
+  <feature name="VSYNC" value="pcsx2_vsync" group="DISPLAY" description="Fix screen tearing. CPU heavy.">
+    <choice name="Disabled" value="0" />
+    <choice name="Enabled" value="1" />
+  </feature>
+  <feature name="INTERLACING PATCHES" value="pcsx2_interlacing_patches" group="DISPLAY" description="Enable No-interlacing Patches.">
+    <choice name="Disabled" value="false" />
+    <choice name="Enabled" value="true" />
+  </feature>
+  <feature name="INTEGER SCALING" value="pcsx2_scaling" group="DISPLAY" description="Can sharpen images in lower resolutions.">
+    <choice name="Disabled" value="false" />
+    <choice name="Enabled" value="true" />
+  </feature>
+  <feature name="GRAPHICS API" value="pcsx2_gfxbackend" group="RENDERING" description="Choose which graphics API library to use.">
+    <choice name="OpenGL" value="12" />
+    <choice name="Software" value="13" />
+    <choice name="Vulkan" value="14" />
+  </feature>
+  <feature name="RENDERING RESOLUTION" value="pcsx2_resolution" group="RENDERING" description="Enhancement. Increase the rendering resolution. Makes 3D objects clearer.">
+    <choice name="Native (PS2)(Default)" value="1" />
+    <choice name="1.25x Native" value="1.25" />
+    <choice name="1.5x Native" value="1.5" />
+    <choice name="1.75x Native" value="1.75" />
+    <choice name="2x Native (~720p)" value="2" />
+    <choice name="2.25x Native" value="2.25" />
+    <choice name="2.5x Native" value="2.5" />
+    <choice name="2.75x Native" value="2.75" />
+    <choice name="3x Native (~1080p)" value="3" />
+    <choice name="3.5x Native" value="3.5" />
+    <choice name="4x Native (~1440p/2K)" value="4" />
+    <choice name="5x Native (~1620p)" value="5" />
+    <choice name="6x Native (~2160p/4K)" value="6" />
+    <choice name="7x Native (~2520p)" value="7" />
+    <choice name="8x Native (~2880p/5K)" value="8" />
+  </feature>
+  <feature name="MIPMAPPING" value="pcsx2_mipmapping" group="RENDERING" description="Choose mipmapping type.">
+    <choice name="Off" value="0" />
+    <choice name="Basic (generated Mipmaps)" value="1" />
+    <choice name="Full (PS2 Mipmaps)" value="2" />
+  </feature>
+  <feature name="TEXTURE FILTERING" value="pcsx2_texture_filtering" group="RENDERING" description="Control the texture filtering of the emulation.">
+    <choice name="Nearest" value="0" />
+    <choice name="Bilinear (Forced)" value="1" />
+    <choice name="Bilinear (PS2)" value="2" />
+    <choice name="Bilinear (Forced excluding sprite)" value="3" />
+  </feature>
+  <feature name="TRILINEAR FILTERING" value="pcsx2_trilinear_filtering" group="RENDERING" description="Control the texture's trilinear filtering of the emulation.">
+    <choice name="Off (None)" value="0" />
+    <choice name="Trilinear (PS2)" value="1" />
+    <choice name="Trilinear (Forced)" value="2" />
+  </feature>
+  <feature name="ANISOTROPIC FILTERING" value="pcsx2_anisotropic_filtering" group="RENDERING" description="Improves clarity of distant textures.">
+    <choice name="Off" value="0" />
+    <choice name="2x" value="2" />
+    <choice name="4x" value="4" />
+    <choice name="8x" value="8" />
+    <choice name="16x" value="16" />
+  </feature>
+  <feature name="DITHERING" value="pcsx2_dithering" group="RENDERING" description="Reduces banding between colours and improves the preceived colour depth.">
+    <choice name="Off" value="0" />
+    <choice name="Unscaled (Default)" value="1" />
+    <choice name="Scaled" value="2" />
+    <choice name="Force 32bit" value="3" />
+  </feature>
+  <feature name="BLENDING ACCURACY" value="pcsx2_blending" group="RENDERING" description="The higher the setting, the more blending is emulated in the shader accurately, and the higher the speed penalty will be.">
+    <choice name="Minimum" value="0" />
+    <choice name="Basic (Recommended)" value="1" />
+    <choice name="Medium" value="2" />
+    <choice name="High" value="3" />
+    <choice name="Full (Slow)" value="4" />
+    <choice name="Maximum (Very Slow)" value="5" />
+  </feature>
+  <feature name="TEXTURE PRELOADING" value="pcsx2_texture_loading" group="RENDERING" description="Uploads entire textures at once instead of small pieces. Improves performance in most games.">
+    <choice name="None" value="0" />
+    <choice name="Partial" value="1" />
+    <choice name="Full (Hash Cache)" value="2" />
+  </feature>
+  <feature name="SHOW BIOS BOOTLOGO" value="pcsx2_fastboot" group="" description="Some games have issues when the animation is shown, others require it.">
+    <choice name="Skip (safer)" value="0" />
+    <choice name="Show (specific games)" value="1" />
+  </feature>
+  <feature name="FXAA" value="pcsx2_fxaa" group="RENDERING" description="Applies the FXAA anti-aliasing algorithm to improve the visual quality of games.">
+    <choice name="Disabled" value="false" />
+    <choice name="Enabled" value="true" />
+  </feature>
+  <feature name="CHEATS" value="pcsx2_cheats" group="" description="Automatically loads and applies cheats on game start.">
+    <choice name="Disabled" value="false" />
+    <choice name="Enabled" value="true" />
+  </feature>
+  <feature name="MULTITAP" value="pcsx2_multitap" group="" description="Allows up to 8 controllers in supported games.">
+    <choice name="Maximum 2 Players (Default)" value="2" />
+    <choice name="Maximum 4 Players" value="4" />
+    <choice name="Maximum 8 Players" value="8" />
+  </feature>
+  <feature name="TEXTURE REPLACEMENTS" value="pcsx2_texture_replacements" group="" description="Allows user replaceable textures.">
+    <choice name="Off" value="false" />
+    <choice name="On" value="true" />
+  </feature>
+  <feature name="TIME CRISIS FOG HACK" value="pcsx2_crisis_fog" group="" description="Necessary for some guns to replace fog textures as a workaround in Time Crisis - Crisis Zone.">
+    <choice name="Off" value="false" />
+    <choice name="On" value="true" />
+  </feature>
+  <feature name="WHEEL MODEL" value="pcsx2_wheel_type" group="" description="Playstation 2 wheel type">
+    <choice name="Driving Force" value="DrivingForce" />
+    <choice name="Driving Force Pro" value="DrivingForcePro" />
+    <choice name="GT Force" value="GTForce" />
+    <choice name="Virtual" value="Virtual" />
+  </feature>
+  <feature name="SHOW LIGHT GUN CROSSHAIRS" value="pcsx2_crosshairs" group="" description="">
+    <choice name="Off" value="0" />
+    <choice name="On" value="1" />
+  </feature>
+  <feature name="MAME HOOKER OUTPUT" value="pcsx2_mamehooker" group="" description="Send output signals to MameOutputSender for recoil/light gun effects via Hook of the Reaper.">
+    <choice name="Enabled (Default)" value="true" />
+    <choice name="Disabled" value="false" />
+  </feature>
+</legacy>

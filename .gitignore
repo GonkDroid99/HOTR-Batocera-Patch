@@ -2,7 +2,7 @@
 # prerelease tag "binaries-v1" and must never be committed to normal Git.
 payload/emulators/duckstation/duckstation-qt
 payload/emulators/duckstation/duckstation-lightgun-qt
-payload/emulators/pcsx2/PCSX2-hotr.AppImage
+payload/emulators/pcsx2/pcsx2-lightgun-qt
 payload/hotr/Hook_of_the_Reaper-x86_64.AppImage
 payload/hotr/hook-of-the-reaper
 
@@ -19,7 +19,7 @@ __pycache__/
 .DS_Store
 .vscode/
 .idea/
-configgen.zip
-.gitignore
-scripts.zip
-.github/newcurrent.zip
+
+# Batocera Buildroot working data / native binary outputs
+buildroot/buildroot.conf
+dist/buildroot-binaries/

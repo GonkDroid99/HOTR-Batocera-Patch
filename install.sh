@@ -23,7 +23,7 @@ VER=""
 msg "Detected Batocera: ${VER:-unknown}"
 echo "$VER" | grep -Eq '(^|[^0-9])43([.]|[^0-9]|$)' || warn "Designed/tested for Batocera 43/43.1; continuing because version detection was '${VER:-unknown}'."
 
-mkdir -p "$HOTR"/{bin,emulators/duckstation,emulators/pcsx2,scripts,software/hook-of-the-reaper,backups,install} \
+mkdir -p "$HOTR"/{bin,emulators/duckstation,emulators/pcsx2,scripts,software/hook-of-the-reaper,backups,install,tools} \
          "$HOTR_DATA"/{data,defaultLG} /userdata/system/services /userdata/system/configs/emulationstation /userdata/roms/ports
 
 fetch_latest_asset(){
@@ -74,19 +74,21 @@ install_duck_from_tree(){
   msg "DuckStation HOTR installed."
 }
 
-install_pcsx2_file(){
-  local f="$1"; [ -f "$f" ] || return 1
-  cp -a "$f" "$HOTR/emulators/pcsx2/PCSX2-hotr.AppImage"
-  cp -a "$BASE/payload/emulators/pcsx2/MameOutputSender" "$HOTR/emulators/pcsx2/MameOutputSender"
-  chmod +x "$HOTR/emulators/pcsx2/PCSX2-hotr.AppImage" "$HOTR/emulators/pcsx2/MameOutputSender"
-  msg "PCSX2 HOTR installed."
+install_pcsx2_from_tree(){
+  local src="$1" bin=""
+  bin="$(find "$src" -type f -name pcsx2-lightgun-qt -print -quit 2>/dev/null || true)"
+  [ -n "$bin" ] || return 1
+  rm -rf "$HOTR/emulators/pcsx2"/*
+  cp -a "$(dirname "$bin")"/. "$HOTR/emulators/pcsx2/"
+  [ -f "$HOTR/emulators/pcsx2/MameOutputSender" ] || cp -a "$BASE/payload/emulators/pcsx2/MameOutputSender" "$HOTR/emulators/pcsx2/MameOutputSender"
+  chmod +x "$HOTR/emulators/pcsx2/pcsx2-lightgun-qt" "$HOTR/emulators/pcsx2/MameOutputSender"
+  msg "PCSX2 HOTR native Batocera build installed."
 }
 
 install_bundled_emulators(){
-  local dsrc="$BASE/payload/emulators/duckstation" psrc="$BASE/payload/emulators/pcsx2" pfile=""
+  local dsrc="$BASE/payload/emulators/duckstation" psrc="$BASE/payload/emulators/pcsx2"
   install_duck_from_tree "$dsrc" || true
-  pfile="$(find "$psrc" -maxdepth 2 -type f -iname 'PCSX2-hotr.AppImage' -print -quit 2>/dev/null || true)"
-  [ -n "$pfile" ] && install_pcsx2_file "$pfile" || true
+  install_pcsx2_from_tree "$psrc" || true
 }
 
 install_github_emulators(){
@@ -96,13 +98,14 @@ install_github_emulators(){
     mkdir -p "$tmp/duck"; extract_any "$tmp/duck.pkg" "$tmp/duck" || die "DuckStation GitHub asset is not a supported archive."
     install_duck_from_tree "$tmp/duck" || die "Downloaded DuckStation asset contains no duckstation-qt binary."
   fi
-  if fetch_latest_asset "$PCSX2_GITHUB_REPO" "$PCSX2_ASSET_REGEX" "$tmp/pcsx2.AppImage"; then
-    install_pcsx2_file "$tmp/pcsx2.AppImage"
+  if fetch_latest_asset "$PCSX2_GITHUB_REPO" "$PCSX2_ASSET_REGEX" "$tmp/pcsx2.pkg"; then
+    mkdir -p "$tmp/pcsx2"; extract_any "$tmp/pcsx2.pkg" "$tmp/pcsx2" || die "PCSX2 GitHub asset is not a supported archive."
+    install_pcsx2_from_tree "$tmp/pcsx2" || die "Downloaded PCSX2 archive contains no pcsx2-lightgun-qt binary."
   fi
 }
 
 case "$MODE" in
-  --auto) install_bundled_emulators; if [ ! -x "$HOTR/emulators/duckstation/duckstation-lightgun-qt" ] || [ ! -x "$HOTR/emulators/pcsx2/PCSX2-hotr.AppImage" ]; then install_github_emulators || true; fi ;;
+  --auto) install_bundled_emulators; if [ ! -x "$HOTR/emulators/duckstation/duckstation-lightgun-qt" ] || [ ! -x "$HOTR/emulators/pcsx2/pcsx2-lightgun-qt" ]; then install_github_emulators || true; fi ;;
   --bundled) install_bundled_emulators ;;
   --github-emulators) install_github_emulators || die "Enable/configure GitHub emulator downloads in installer.conf." ;;
   --infrastructure-only) : ;;
@@ -127,8 +130,13 @@ cp -a "$BASE/scripts/hotr-configgen-launch" "$BASE/scripts/add-emulator-config.s
 cp -a "$BASE/scripts/custom-boot.sh" "$BASE/scripts/custom-stop.sh" "$HOTR/scripts/"
 cp -a "$BASE/scripts/hotr-service" /userdata/system/services/hotr
 cp -a "$BASE/emulationstation/es_systems_hotr.cfg" /userdata/system/configs/emulationstation/es_systems_hotr.cfg
-cp -a "$BASE/emulationstation/es_features_hotr.cfg" /userdata/system/configs/emulationstation/es_features_hotr.cfg
+cp -a "$BASE/emulationstation/pcsx2_legacy_features.xml" "$HOTR/install/pcsx2_legacy_features.xml"
+cp -a "$BASE/scripts/generate-es-features-hotr.py" "$HOTR/bin/generate-es-features-hotr.py"
+chmod +x "$HOTR/bin/generate-es-features-hotr.py"
+"$HOTR/bin/generate-es-features-hotr.py" "$HOTR/install/pcsx2_legacy_features.xml"
 cp -a "$BASE/installer.conf" "$HOTR/install/installer.conf"
+cp -a "$BASE/uninstall.sh" "$BASE/update.sh" "$BASE/check-install.sh" "$HOTR/tools/"
+chmod +x "$HOTR/tools/"*.sh
 chmod +x "$HOTR/bin/"* "$HOTR/scripts/"*.sh /userdata/system/services/hotr
 
 # Adapted Ports launchers.
@@ -201,5 +209,5 @@ if command -v batocera-services >/dev/null; then batocera-services enable hotr |
 
 msg "Installation complete."
 [ -x "$HOTR/emulators/duckstation/duckstation-lightgun-qt" ] || warn "DuckStation HOTR binary is not installed yet. Add it or configure GitHub downloads."
-[ -x "$HOTR/emulators/pcsx2/PCSX2-hotr.AppImage" ] || warn "PCSX2-hotr.AppImage is not installed yet. Add it or configure GitHub downloads."
+[ -x "$HOTR/emulators/pcsx2/pcsx2-lightgun-qt" ] || warn "pcsx2-lightgun-qt is not installed yet. Build/publish the native Batocera payload."
 msg "Restart EmulationStation or reboot. Systems: PlayStation HOTR and PlayStation 2 HOTR."

@@ -9,13 +9,14 @@ from ..lightgun_rs3 import count_rs3_guns, wrap_with_gun_reset
 from ..pcsx2.pcsx2Generator import Pcsx2Generator
 
 _PCSX2_LIGHTGUN_BIN_DIR: Final = Path("/userdata/system/hotr/emulators/pcsx2")
-_PCSX2_LIGHTGUN_APPIMAGE: Final = _PCSX2_LIGHTGUN_BIN_DIR / "PCSX2-hotr.AppImage"
+_PCSX2_LIGHTGUN_BIN: Final = _PCSX2_LIGHTGUN_BIN_DIR / "pcsx2-lightgun-qt"
+_PCSX2_LIGHTGUN_LIB_DIR: Final = _PCSX2_LIGHTGUN_BIN_DIR / "lib"
 _PCSX2_LIGHTGUN_CONFIG_DIR: Final = CONFIGS / "PCSX2-lightgun"
 _PCSX2_LIGHTGUN_XDG_HOME: Final = CONFIGS / "pcsx2-lightgun-xdg"
 
 
 class Pcsx2LightgunGenerator(Pcsx2Generator):
-    """Stock Batocera PCSX2 config + isolated HOTR AppImage/output/gun changes."""
+    """Stock Batocera PCSX2 config + native HOTR binary/output/gun changes."""
 
     def executionDirectory(self, config, rom):
         # Keep MameOutputSender and any relative resources beside PCSX2 HOTR.
@@ -25,10 +26,18 @@ class Pcsx2LightgunGenerator(Pcsx2Generator):
         cmd = super().generate(system, rom, playersControllers, metadata, guns, wheels, gameResolution)
 
         if cmd.array:
-            cmd.array[0] = str(_PCSX2_LIGHTGUN_APPIMAGE)
+            cmd.array[0] = str(_PCSX2_LIGHTGUN_BIN)
 
-        # Batocera images do not need to provide FUSE for the AppImage to run.
-        cmd.env["APPIMAGE_EXTRACT_AND_RUN"] = "1"
+        # PCSX2 HOTR ships private runtime libraries beside the emulator.
+        # Preserve Batocera's existing library search path while putting our
+        # bundled libraries first.
+        existing_ld_library_path = cmd.env.get("LD_LIBRARY_PATH", "")
+        cmd.env["LD_LIBRARY_PATH"] = (
+            f"{_PCSX2_LIGHTGUN_LIB_DIR}:{existing_ld_library_path}"
+            if existing_ld_library_path
+            else str(_PCSX2_LIGHTGUN_LIB_DIR)
+        )
+
         cmd.env["XDG_CONFIG_HOME"] = str(_PCSX2_LIGHTGUN_XDG_HOME)
 
         reg_dir = _PCSX2_LIGHTGUN_XDG_HOME / "PCSX2"

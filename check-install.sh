@@ -12,7 +12,7 @@ check_exec /userdata/system/hotr/bin/hotr-configgen-launch
 check_exec /userdata/system/hotr/emulators/duckstation/MameOutputSender
 check_exec /userdata/system/hotr/emulators/pcsx2/MameOutputSender
 [ -x /userdata/system/hotr/emulators/duckstation/duckstation-lightgun-qt ] && echo '[OK] DuckStation HOTR binary' || echo '[OPTIONAL/MISSING] DuckStation HOTR binary'
-[ -x /userdata/system/hotr/emulators/pcsx2/PCSX2-hotr.AppImage ] && echo '[OK] PCSX2 HOTR AppImage' || echo '[OPTIONAL/MISSING] PCSX2 HOTR AppImage'
+[ -x /userdata/system/hotr/emulators/pcsx2/pcsx2-lightgun-qt ] && echo '[OK] PCSX2 HOTR native binary' || echo '[MISSING] PCSX2 HOTR native binary'
 GENROOT=$(find /usr/lib/python* -type d -path '*/site-packages/configgen/generators' -print -quit 2>/dev/null || true)
 if [ -n "$GENROOT" ]; then check "$GENROOT/duckstation_lightgun/duckstationLightgunGenerator.py"; check "$GENROOT/pcsx2_lightgun/pcsx2LightgunGenerator.py"; check "$GENROOT/lightgun_rs3.py"; else echo '[MISSING] configgen generators root'; ok=0; fi
 check /etc/udev/rules.d/99-hotr.rules

@@ -23,7 +23,7 @@ Before `git add .`, verify the large files are ignored/untracked:
 git status --short
 git check-ignore -v \
   payload/emulators/duckstation/duckstation-qt \
-  payload/emulators/pcsx2/PCSX2-hotr.AppImage \
+  payload/emulators/pcsx2/pcsx2-lightgun-qt \
   payload/hotr/Hook_of_the_Reaper-x86_64.AppImage \
   dist/HOTR-Batocera43-x86_64.zip
 ```

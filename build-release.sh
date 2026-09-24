@@ -14,7 +14,7 @@ for candidate in "$ROOT/payload/emulators/duckstation/duckstation-qt" "$ROOT/pay
 done
 [ -n "$DUCK" ] || { echo "ERROR: DuckStation binary is missing from payload/emulators/duckstation." >&2; exit 2; }
 need_exec "$ROOT/payload/emulators/duckstation/MameOutputSender"
-need_exec "$ROOT/payload/emulators/pcsx2/PCSX2-hotr.AppImage"
+need_exec "$ROOT/payload/emulators/pcsx2/pcsx2-lightgun-qt"
 need_exec "$ROOT/payload/emulators/pcsx2/MameOutputSender"
 need_exec "$ROOT/payload/hotr/hook-of-the-reaper"
 

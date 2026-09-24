@@ -1,0 +1,209 @@
+#!/usr/bin/python3
+"""
+MameOutputSender — Batocera bridge between DuckStation LightGun and Hook of the Reaper.
+
+Replaces the .NET MameOutputSender that cannot run on Batocera.
+
+DuckStation connects here as Unix socket clients:
+  /tmp/CoreFxPipe_MameHookerProxyControl         — game state / output signals
+  /tmp/CoreFxPipe_MameHookerProxyRecoilGun[ABCD] — gun recoil triggers
+
+Hook of the Reaper connects here as a TCP client on port 8000.
+HOTR expects MAME network-output protocol:  "key = value\r\n"
+"""
+
+import os, sys, socket, select, time
+
+PIPE_BASE   = "/tmp/CoreFxPipe_"
+CTRL_PIPE   = PIPE_BASE + "MameHookerProxyControl"
+GUN_PIPES   = [PIPE_BASE + f"MameHookerProxyRecoilGun{c}" for c in "ABCD"]
+GUN_SIGNALS = ["GunRecoil_P1", "GunRecoil_P2", "TriggerPress_P1", "TriggerPress_P2"]
+TCP_PORT    = 8000
+MAX_RUNTIME = 10800  # 3 hours
+
+
+def parse_gamename():
+    for a in sys.argv[1:]:
+        if a.startswith("gamename="):
+            return a[9:]
+    return ""
+
+
+def make_unix_server(path):
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.bind(path)
+    s.listen(1)
+    s.setblocking(False)
+    return s
+
+
+def make_tcp_server():
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    s.bind(("127.0.0.1", TCP_PORT))
+    s.listen(1)
+    s.setblocking(False)
+    return s
+
+
+def main():
+    gamename = parse_gamename()
+
+    log = open("/tmp/MameOutputSender.log", "w", buffering=1)
+    log.write(f"Started: gamename={gamename!r}\n")
+
+    ctrl_srv = make_unix_server(CTRL_PIPE)
+    gun_srvs = [make_unix_server(p) for p in GUN_PIPES]
+    tcp_srv  = make_tcp_server()
+
+    hotr    = None   # TCP socket: connection from HOTR
+    ds_ctrl = None   # Unix socket: connection from DuckStation control pipe
+    ds_guns = [None, None, None, None]  # gun pipe connections
+
+    def send_hotr(msg):
+        nonlocal hotr
+        if hotr is None:
+            return
+        try:
+            hotr.sendall((msg + "\r\n").encode())
+            log.write(f"→HOTR: {msg!r}\n")
+        except Exception as e:
+            log.write(f"HOTR send error: {e}\n")
+            try:
+                hotr.close()
+            except Exception:
+                pass
+            hotr = None
+
+    deadline = time.monotonic() + MAX_RUNTIME
+    while time.monotonic() < deadline:
+        read_list = [tcp_srv, ctrl_srv] + gun_srvs
+        if ds_ctrl:
+            read_list.append(ds_ctrl)
+        for g in ds_guns:
+            if g:
+                read_list.append(g)
+
+        try:
+            readable, _, _ = select.select(read_list, [], [], 1.0)
+        except Exception as e:
+            log.write(f"select error: {e}\n")
+            break
+
+        for s in readable:
+            if s is tcp_srv:
+                try:
+                    conn, _ = tcp_srv.accept()
+                    if hotr:
+                        try:
+                            hotr.close()
+                        except Exception:
+                            pass
+                    hotr = conn
+                    log.write("HOTR connected via TCP\n")
+                    if gamename:
+                        send_hotr(f"mame_start = {gamename}")
+                except Exception as e:
+                    log.write(f"tcp accept error: {e}\n")
+
+            elif s is ctrl_srv:
+                try:
+                    conn, _ = ctrl_srv.accept()
+                    if ds_ctrl:
+                        try:
+                            ds_ctrl.close()
+                        except Exception:
+                            pass
+                    ds_ctrl = conn
+                    log.write("DuckStation control pipe connected\n")
+                except Exception as e:
+                    log.write(f"ctrl accept error: {e}\n")
+
+            elif s is ds_ctrl:
+                try:
+                    data = s.recv(256)
+                    if not data:
+                        log.write("DuckStation control pipe closed\n")
+                        ds_ctrl = None
+                        send_hotr("mame_stop = ")
+                    else:
+                        msg = data.decode(errors="replace").strip()
+                        log.write(f"←DS ctrl: {msg!r}\n")
+                        if msg == "CLOSE":
+                            send_hotr("mame_stop = ")
+                        elif ":" in msg:
+                            key, val = msg.split(":", 1)
+                            send_hotr(f"{key} = {val}")
+                except Exception as e:
+                    log.write(f"ctrl read error: {e}\n")
+                    ds_ctrl = None
+
+            else:
+                handled = False
+                for i in range(4):
+                    if s is gun_srvs[i]:
+                        try:
+                            conn, _ = gun_srvs[i].accept()
+                            if ds_guns[i]:
+                                try:
+                                    ds_guns[i].close()
+                                except Exception:
+                                    pass
+                            ds_guns[i] = conn
+                            log.write(f"DuckStation gun {i} ({GUN_SIGNALS[i]}) connected\n")
+                        except Exception as e:
+                            log.write(f"gun {i} accept error: {e}\n")
+                        handled = True
+                        break
+                    if s is ds_guns[i]:
+                        try:
+                            data = s.recv(16)
+                            if not data:
+                                log.write(f"DS gun {i} closed\n")
+                                ds_guns[i] = None
+                            else:
+                                log.write(f"←DS gun {i}: {data!r}\n")
+                                send_hotr(f"{GUN_SIGNALS[i]} = 1")
+                        except Exception as e:
+                            log.write(f"gun {i} read error: {e}\n")
+                            ds_guns[i] = None
+                        handled = True
+                        break
+
+    log.write("MameOutputSender exiting\n")
+    log.close()
+
+    for srv in [ctrl_srv, tcp_srv] + gun_srvs:
+        try:
+            srv.close()
+        except Exception:
+            pass
+    for path in [CTRL_PIPE] + GUN_PIPES:
+        try:
+            os.unlink(path)
+        except Exception:
+            pass
+    if hotr:
+        try:
+            hotr.close()
+        except Exception:
+            pass
+    if ds_ctrl:
+        try:
+            ds_ctrl.close()
+        except Exception:
+            pass
+    for g in ds_guns:
+        if g:
+            try:
+                g.close()
+            except Exception:
+                pass
+
+
+if __name__ == "__main__":
+    main()

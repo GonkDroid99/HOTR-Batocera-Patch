@@ -1,79 +1,84 @@
 #!/usr/bin/env python3
-"""Clone Batocera's stock DuckStation/PCSX2 ES features for HOTR cores.
-
-This avoids maintaining a tiny custom feature list which hides all normal PCSX2
-advanced settings. It copies the stock feature definitions from the installed
-Batocera version and only renames the emulator/core plus adds the HOTR output
-switch.
+"""Create HOTR ES features by cloning Batocera stock features and merging the
+known-working PCSX2 LightGun option set from the old Batocera package.
 """
 from copy import deepcopy
 from pathlib import Path
 import sys
 import xml.etree.ElementTree as ET
 
-SOURCE = Path("/usr/share/emulationstation/es_features.cfg")
-DEST = Path("/userdata/system/configs/emulationstation/es_features_hotr.cfg")
+SOURCE = Path('/usr/share/emulationstation/es_features.cfg')
+DEST = Path('/userdata/system/configs/emulationstation/es_features_hotr.cfg')
+LEGACY = Path(sys.argv[1]) if len(sys.argv) > 1 else Path('/userdata/system/hotr/install/pcsx2_legacy_features.xml')
 
 if not SOURCE.exists():
-    raise SystemExit(f"Stock ES features not found: {SOURCE}")
+    raise SystemExit(f'Stock ES features not found: {SOURCE}')
+stock = ET.parse(SOURCE).getroot()
+out = ET.Element('features')
 
-src_root = ET.parse(SOURCE).getroot()
-out_root = ET.Element("features")
-
-
-def clone_core(emulator_name: str, stock_core: str, new_emulator: str, new_core: str, setting: str, label: str):
-    src_emulator = src_root.find(f".//emulator[@name='{emulator_name}']")
-    if src_emulator is None:
-        raise SystemExit(f"Could not find stock emulator '{emulator_name}' in {SOURCE}")
-
-    emu = deepcopy(src_emulator)
-    emu.set("name", new_emulator)
-
-    cores = emu.find("cores")
+def find_core(emu_name, preferred):
+    emu = stock.find(f".//emulator[@name='{emu_name}']")
+    if emu is None:
+        raise RuntimeError(f"stock emulator '{emu_name}' not found")
+    clone = deepcopy(emu)
+    cores = clone.find('cores')
     if cores is None:
-        raise SystemExit(f"Stock emulator '{emulator_name}' has no <cores> section")
-
-    chosen = None
-    for core in list(cores):
-        if core.get("name") == stock_core:
-            chosen = core
+        raise RuntimeError(f"stock emulator '{emu_name}' has no cores")
+    selected = None
+    for c in list(cores):
+        if c.get('name') == preferred:
+            selected = c
         else:
-            cores.remove(core)
+            cores.remove(c)
+    if selected is None:
+        remain=list(cores)
+        if len(remain)==1: selected=remain[0]
+        else: raise RuntimeError(f"core '{preferred}' not found for '{emu_name}'")
+    return clone, selected
 
-    if chosen is None:
-        remaining = list(cores)
-        if len(remaining) == 1:
-            chosen = remaining[0]
-        else:
-            raise SystemExit(f"Could not identify stock core '{stock_core}' for '{emulator_name}'")
+def add_output_switch(core, setting):
+    if any(x.get('value') == setting for x in core.findall('feature')):
+        return
+    f=ET.SubElement(core,'feature',{
+      'name':'MAMEHOOKER / HOTR OUTPUT','group':'LIGHT GUN','value':setting,
+      'description':'Send emulator output events to MameOutputSender and Hook of the Reaper.'})
+    ET.SubElement(f,'choice',{'name':'Enabled','value':'true'})
+    ET.SubElement(f,'choice',{'name':'Disabled','value':'false'})
 
-    chosen.set("name", new_core)
-    features_attr = chosen.get("features", "").split()
-    if "use_guns" not in features_attr:
-        features_attr.append("use_guns")
-    chosen.set("features", " ".join(x for x in features_attr if x))
+def append_feature_flags(core, flags):
+    current=core.get('features','').split()
+    for flag in flags:
+        if flag and flag not in current: current.append(flag)
+    core.set('features',' '.join(current))
 
-    # Avoid adding it twice if this script is adapted/re-run against an already-custom source.
-    for feature in chosen.findall("feature"):
-        if feature.get("value") == setting:
-            break
-    else:
-        feature = ET.SubElement(chosen, "feature", {
-            "name": label,
-            "group": "LIGHT GUN",
-            "value": setting,
-            "description": "Send emulator output events to MameOutputSender and Hook of the Reaper.",
-        })
-        ET.SubElement(feature, "choice", {"name": "Enabled", "value": "true"})
-        ET.SubElement(feature, "choice", {"name": "Disabled", "value": "false"})
+# DuckStation: clone every stock option, rename only the core.
+duck, dcore = find_core('duckstation','duckstation')
+duck.set('name','duckstation')
+dcore.set('name','duckstation-lightgun')
+append_feature_flags(dcore,['use_guns'])
+add_output_switch(dcore,'duckstation_mamehooker')
+out.append(duck)
 
-    out_root.append(emu)
+# PCSX2: start from current Batocera 43 PCSX2 options.
+pcsx, pcore = find_core('pcsx2','pcsx2')
+pcsx.set('name','pcsx2-lightgun')
+pcore.set('name','pcsx2-lightgun')
+append_feature_flags(pcore,['use_guns'])
 
-
-clone_core("duckstation", "duckstation", "duckstation", "duckstation-lightgun", "duckstation_mamehooker", "MAMEHOOKER / HOTR OUTPUT")
-clone_core("pcsx2", "pcsx2", "pcsx2-lightgun", "pcsx2-lightgun", "pcsx2_mamehooker", "MAMEHOOKER / HOTR OUTPUT")
+# Merge the old known-working LightGun package's 31 custom options. Current
+# stock options win when the same setting key exists, so this also survives
+# small Batocera 43 option changes.
+if LEGACY.exists():
+    legacy=ET.parse(LEGACY).getroot()
+    append_feature_flags(pcore, legacy.get('features','').split())
+    existing={f.get('value') for f in pcore.findall('feature')}
+    for feature in legacy.findall('feature'):
+        if feature.get('value') not in existing:
+            pcore.append(deepcopy(feature)); existing.add(feature.get('value'))
+add_output_switch(pcore,'pcsx2_mamehooker')
+out.append(pcsx)
 
 DEST.parent.mkdir(parents=True, exist_ok=True)
-ET.indent(out_root, space="  ")
-ET.ElementTree(out_root).write(DEST, encoding="UTF-8", xml_declaration=True)
-print(f"Wrote {DEST}")
+ET.indent(out,space='  ')
+ET.ElementTree(out).write(DEST,encoding='UTF-8',xml_declaration=True)
+print(f'Wrote {DEST}')
