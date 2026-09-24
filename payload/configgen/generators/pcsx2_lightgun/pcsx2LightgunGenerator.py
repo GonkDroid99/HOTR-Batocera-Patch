@@ -10,9 +10,9 @@ from ..pcsx2.pcsx2Generator import Pcsx2Generator
 
 _PCSX2_LIGHTGUN_BIN_DIR: Final = Path("/userdata/system/hotr/emulators/pcsx2")
 _PCSX2_LIGHTGUN_BIN: Final = _PCSX2_LIGHTGUN_BIN_DIR / "pcsx2-lightgun-qt"
-_PCSX2_LIGHTGUN_LIB_DIR: Final = _PCSX2_LIGHTGUN_BIN_DIR / "lib"
-_PCSX2_LIGHTGUN_CONFIG_DIR: Final = CONFIGS / "PCSX2-lightgun"
 _PCSX2_LIGHTGUN_XDG_HOME: Final = CONFIGS / "pcsx2-lightgun-xdg"
+_PCSX2_LIGHTGUN_CONFIG_DIR: Final = _PCSX2_LIGHTGUN_XDG_HOME / "PCSX2"
+_PCSX2_LIGHTGUN_LIB_DIR: Final = _PCSX2_LIGHTGUN_BIN_DIR / "lib"
 
 
 class Pcsx2LightgunGenerator(Pcsx2Generator):
@@ -28,9 +28,10 @@ class Pcsx2LightgunGenerator(Pcsx2Generator):
         if cmd.array:
             cmd.array[0] = str(_PCSX2_LIGHTGUN_BIN)
 
-        # PCSX2 HOTR ships private runtime libraries beside the emulator.
-        # Preserve Batocera's existing library search path while putting our
-        # bundled libraries first.
+        # Keep the custom build isolated from stock PCSX2. PCSX2 always uses a
+        # PCSX2/ directory below XDG_CONFIG_HOME, so configure the INI there
+        # directly instead of trying to redirect it to a second config tree.
+        cmd.env["XDG_CONFIG_HOME"] = str(_PCSX2_LIGHTGUN_XDG_HOME)
         existing_ld_library_path = cmd.env.get("LD_LIBRARY_PATH", "")
         cmd.env["LD_LIBRARY_PATH"] = (
             f"{_PCSX2_LIGHTGUN_LIB_DIR}:{existing_ld_library_path}"
@@ -38,9 +39,7 @@ class Pcsx2LightgunGenerator(Pcsx2Generator):
             else str(_PCSX2_LIGHTGUN_LIB_DIR)
         )
 
-        cmd.env["XDG_CONFIG_HOME"] = str(_PCSX2_LIGHTGUN_XDG_HOME)
-
-        reg_dir = _PCSX2_LIGHTGUN_XDG_HOME / "PCSX2"
+        reg_dir = _PCSX2_LIGHTGUN_CONFIG_DIR
         reg_dir.mkdir(parents=True, exist_ok=True)
         with (reg_dir / "PCSX2-reg.ini").open("w") as f:
             f.write("DocumentsFolderMode=User\n")
@@ -61,6 +60,30 @@ class Pcsx2LightgunGenerator(Pcsx2Generator):
         pcsx2_config = CaseSensitiveConfigParser(interpolation=None)
         if config_path.exists():
             pcsx2_config.read(config_path)
+
+        # The stock INI uses paths relative to /userdata/system/configs/PCSX2.
+        # Our isolated XDG tree is one level deeper, so those relative paths
+        # point at the wrong locations. Use the Batocera userdata locations
+        # explicitly. These values were verified on Batocera 43.1.
+        if not pcsx2_config.has_section("Folders"):
+            pcsx2_config.add_section("Folders")
+        for key, value in {
+            "Bios": "/userdata/bios/ps2",
+            "Snapshots": "/userdata/screenshots",
+            "Savestates": "/userdata/saves/ps2/pcsx2/sstates",
+            "MemoryCards": "/userdata/saves/ps2/pcsx2",
+            "Logs": "/userdata/system/logs",
+            "Cheats": "/userdata/cheats/ps2",
+            "CheatsWS": "/userdata/cheats/ps2/cheats_ws",
+            "CheatsNI": "/userdata/cheats/ps2/cheats_ni",
+            "Cache": "/userdata/system/cache/ps2",
+            "Videos": "/userdata/saves/ps2/pcsx2/videos",
+        }.items():
+            pcsx2_config.set("Folders", key, value)
+
+        if not pcsx2_config.has_section("UI"):
+            pcsx2_config.add_section("UI")
+        pcsx2_config.set("UI", "SetupWizardIncomplete", "false")
 
         sdl_keys = [
             "guncon2_Trigger", "guncon2_A", "guncon2_B", "guncon2_Recalibrate",
