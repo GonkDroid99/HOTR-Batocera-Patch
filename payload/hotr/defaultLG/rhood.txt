@@ -1,0 +1,25 @@
+Players
+1
+P1
+Recoil & Reload
+Ammo_Value 0
+Recoil 1
+Recoil_R2S 0
+Recoil_Value 1
+[States]
+:mame_start
+*All
+>Open_COM
+:mame_stop
+*All
+>Close_COM
+[Signals]
+:BonusDisplay
+:Credits
+:MameOrientation
+:MamePause
+:P1_CtmLmpStart
+:P1_CtmRecoil
+*P1
+#Recoil
+#Recoil_Value

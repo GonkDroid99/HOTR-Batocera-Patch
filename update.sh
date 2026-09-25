@@ -16,6 +16,9 @@ for a in d.get('assets',[]):
 else: raise SystemExit('No matching release asset')
 PY
 unzip -q "$TMP/release.zip" -d "$TMP/release"
-ROOT=$(find "$TMP/release" -maxdepth 2 -type f -name install.sh -printf '%h\n' | head -1)
+ROOT=""
+for candidate in "$TMP/release"/*/install.sh "$TMP/release"/install.sh; do
+  if [ -f "$candidate" ]; then ROOT="${candidate%/install.sh}"; break; fi
+done
 [ -n "$ROOT" ] || { echo 'Release has no install.sh'; exit 3; }
 exec "$ROOT/install.sh" --auto

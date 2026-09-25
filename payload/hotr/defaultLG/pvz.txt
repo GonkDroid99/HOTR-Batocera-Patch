@@ -1,0 +1,34 @@
+Players
+1
+P1
+Recoil & Reload
+Ammo_Value 0
+Recoil 1
+Recoil_R2S 1
+Recoil_Value 1
+[States]
+:mame_start
+*All
+>Open_COM
+:mame_stop
+*All
+>Close_COM
+[Signals]
+:Credits
+:P1_CtmRecoil
+*P1
+#Recoil
+#Recoil_Value
+:P1_Damaged
+*P1
+>Damage
+:P1_GunRecoil
+*P1
+#Recoil_R2S
+:P1_LmpGun_B
+:P1_LmpGun_G
+:P1_LmpGun_R
+:P1_Lmp_G
+:P1_Lmp_R
+:TicketDrive
+:TicketMeter

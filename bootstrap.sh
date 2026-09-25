@@ -31,7 +31,10 @@ else:
 PY
 
 unzip -q "$TMP/hotr.zip" -d "$TMP/release"
-ROOT="$(find "$TMP/release" -maxdepth 3 -type f -name install.sh -printf '%h\n' | head -1)"
+ROOT=""
+for candidate in "$TMP/release"/*/install.sh "$TMP/release"/install.sh; do
+  if [ -f "$candidate" ]; then ROOT="${candidate%/install.sh}"; break; fi
+done
 [ -n "$ROOT" ] || { echo "ERROR: install.sh is missing from the release ZIP." >&2; exit 3; }
 chmod +x "$ROOT/install.sh"
 exec "$ROOT/install.sh" --auto

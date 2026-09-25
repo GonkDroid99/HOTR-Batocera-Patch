@@ -1,0 +1,38 @@
+Players
+2
+P1
+P2
+Recoil & Reload
+Ammo_Value 0
+Recoil 1
+Recoil_R2S 0
+Recoil_Value 1
+[States]
+:mame_start
+*All
+>Open_COM
+:mame_stop
+*All
+>Close_COM
+[Signals]
+:P1_CtmRecoil
+*P1
+#Recoil
+#Recoil_Value
+:P2_CtmRecoil
+*P2
+#Recoil
+#Recoil_Value
+:P1_GunMotor
+:P2_GunMotor
+:P1_LmpStart
+:P2_LmpStart
+:P1_LmpFront
+:P2_LmpFront
+:P1_LmpGun
+*P1
+>Shake
+:P2_LmpGun
+*P2
+>Shake
+:Credits

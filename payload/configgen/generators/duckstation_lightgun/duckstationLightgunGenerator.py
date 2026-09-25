@@ -5,7 +5,7 @@ from pathlib import Path
 from ...batoceraPaths import CONFIGS
 from ...utils.configparser import CaseSensitiveConfigParser
 from ..duckstation.duckstationGenerator import DuckstationGenerator
-from ..lightgun_rs3 import count_rs3_guns, wrap_with_gun_reset
+from ..lightgun_rs3 import count_rs3_guns
 
 _DUCK_HOTR_DIR = Path("/userdata/system/hotr/emulators/duckstation")
 _DUCK_HOTR_QT = _DUCK_HOTR_DIR / "duckstation-lightgun-qt"
@@ -72,5 +72,5 @@ class DuckstationLightgunGenerator(DuckstationGenerator):
         with settings_path.open("w") as f:
             settings.write(f)
 
-        wrap_with_gun_reset(cmd, gun_count)
+        # HOTR owns RS3 ZJ/ZM lifecycle. Do not send direct serial resets here.
         return cmd

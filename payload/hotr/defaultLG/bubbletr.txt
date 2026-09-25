@@ -1,0 +1,49 @@
+Players
+2
+P1
+P2
+Recoil & Reload
+Ammo_Value 0
+Recoil 1
+Recoil_R2S 0
+Recoil_Value 0
+[States]
+:mame_start
+*All
+>Open_COM
+:mame_stop
+*All
+>Close_COM
+[Signals]
+:digit0
+:digit1
+:digit2
+:digit3
+:digit4
+:digit5
+:digit6
+:digit7
+:diorama0
+*All
+>Shake
+:diorama1
+*All
+>Shake
+:diorama2
+*All
+>Shake
+:diorama3
+*All
+>Shake
+:diorama4
+*All
+>Shake
+:diorama5
+*All
+>Shake
+:gun_recoil0
+*P1
+#Recoil
+:gun_recoil1
+*P2
+#Recoil

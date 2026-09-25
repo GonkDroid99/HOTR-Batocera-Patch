@@ -1,0 +1,39 @@
+Players
+3
+P1 Slow
+P2 Slow
+P3 Slow
+Recoil & Reload
+Ammo_Value 0
+Recoil 1
+Recoil_R2S 0
+Recoil_Value 1
+[States]
+:mame_start
+*All
+>Open_COM
+:mame_stop
+*All
+>Close_COM
+[Signals]
+:Player1_Gun_Recoil
+*P1
+#Recoil
+#Recoil_Value
+:Player2_Gun_Recoil
+*P2
+#Recoil
+#Recoil_Value
+:Player1_Gun_LED
+*P1
+>Shake
+:Player2_Gun_LED
+*P2
+>Shake
+:Player3_Gun_LED
+*P3
+>Shake
+:Player3_Gun_Recoil
+*P3
+#Recoil
+#Recoil_Value

@@ -1,14 +1,37 @@
 #!/bin/bash
 set -euo pipefail
 
-# Usage from es_systems_hotr.cfg:
-#   hotr-configgen-launch psx-hotr %CONTROLLERSCONFIG% -rom %ROM%
-#   hotr-configgen-launch ps2-hotr %CONTROLLERSCONFIG% -rom %ROM%
-#
-# IMPORTANT: %CONTROLLERSCONFIG% expands to MANY arguments. Do not capture it
-# into a single shell variable; pass the remaining arguments through verbatim.
+# %CONTROLLERSCONFIG% expands to many arguments. SYSTEM is the only argument
+# consumed here; everything else is passed through verbatim to configgen.
 SYSTEM="${1:?HOTR system name missing}"
 shift
+
+pcsx2_fullscreen_fix() {
+  # The custom PCSX2 build can start with a full-size X11 window whose rendered
+  # content is only quarter-screen. Toggling fullscreen twice on the real game
+  # window fixes it. Target by process PID + large window geometry, never title
+  # or a hard-coded resolution. This is intentionally PS2-HOTR only.
+  local tries=0 pid wid
+  command -v wmctrl >/dev/null 2>&1 || return 0
+  command -v xdotool >/dev/null 2>&1 || return 0
+
+  while [ "$tries" -lt 40 ]; do
+    pid="$(pgrep -f '/userdata/system/hotr/emulators/pcsx2/pcsx2-lightgun-qt' | head -1 || true)"
+    if [ -n "$pid" ]; then
+      wid="$(wmctrl -lpG 2>/dev/null | awk -v p="$pid" '$3 == p && $6 >= 640 && $7 >= 480 {print $1; exit}')"
+      if [ -n "$wid" ]; then
+        wmctrl -ia "$wid" 2>/dev/null || true
+        sleep 0.25
+        xdotool key --window "$wid" alt+Return 2>/dev/null || true
+        sleep 0.5
+        xdotool key --window "$wid" alt+Return 2>/dev/null || true
+        return 0
+      fi
+    fi
+    sleep 0.5
+    tries=$((tries + 1))
+  done
+}
 
 case "$SYSTEM" in
   psx-hotr)
@@ -18,6 +41,7 @@ case "$SYSTEM" in
   ps2-hotr)
     EMULATOR="pcsx2-lightgun"
     CORE="pcsx2-lightgun"
+    pcsx2_fullscreen_fix &
     ;;
   *)
     echo "HOTR: unknown system: $SYSTEM" >&2

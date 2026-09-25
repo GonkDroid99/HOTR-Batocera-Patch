@@ -1,0 +1,43 @@
+Players
+2
+P1
+P2
+Recoil & Reload
+Ammo_Value 0
+Recoil 0
+Recoil_R2S 1
+Recoil_Value 0
+[States]
+:mame_start
+*All
+>Open_COM
+:mame_stop
+*All
+>Close_COM
+[Signals]
+:Player1_Gun_Recoil
+*P1
+#Recoil_R2S
+:gun_recoil0
+*P1
+#Recoil_R2S
+:Player2_Gun_Recoil
+*P2
+#Recoil_R2S
+:gun_recoil1
+*P2
+#Recoil_R2S
+:dollhouse
+:toybox
+:bathroom
+:bureau
+:refrigerator
+:porch
+:zip100
+:zip10
+:zip1
+:time10
+:time1
+:zap100
+:zap10
+:zap1

@@ -12,7 +12,7 @@ Hook of the Reaper connects here as a TCP client on port 8000.
 HOTR expects MAME network-output protocol:  "key = value\r\n"
 """
 
-import os, sys, socket, select, time
+import os, sys, socket, select, time, signal
 
 PIPE_BASE   = "/tmp/CoreFxPipe_"
 CTRL_PIPE   = PIPE_BASE + "MameHookerProxyControl"
@@ -61,6 +61,8 @@ def main():
     tcp_srv  = make_tcp_server()
 
     hotr    = None   # TCP socket: connection from HOTR
+    stop_sent = False
+    shutdown_requested = False
     ds_ctrl = None   # Unix socket: connection from DuckStation control pipe
     ds_guns = [None, None, None, None]  # gun pipe connections
 
@@ -79,8 +81,22 @@ def main():
                 pass
             hotr = None
 
+    def send_stop():
+        nonlocal stop_sent
+        if not stop_sent:
+            send_hotr("mame_stop = ")
+            stop_sent = True
+
+    def request_shutdown(signum, _frame):
+        nonlocal shutdown_requested
+        log.write(f"signal {signum} received; shutting down gracefully\n")
+        shutdown_requested = True
+
+    signal.signal(signal.SIGTERM, request_shutdown)
+    signal.signal(signal.SIGINT, request_shutdown)
+
     deadline = time.monotonic() + MAX_RUNTIME
-    while time.monotonic() < deadline:
+    while time.monotonic() < deadline and not shutdown_requested:
         read_list = [tcp_srv, ctrl_srv] + gun_srvs
         if ds_ctrl:
             read_list.append(ds_ctrl)
@@ -129,12 +145,12 @@ def main():
                     if not data:
                         log.write("DuckStation control pipe closed\n")
                         ds_ctrl = None
-                        send_hotr("mame_stop = ")
+                        send_stop()
                     else:
                         msg = data.decode(errors="replace").strip()
                         log.write(f"←DS ctrl: {msg!r}\n")
                         if msg == "CLOSE":
-                            send_hotr("mame_stop = ")
+                            send_stop()
                         elif ":" in msg:
                             key, val = msg.split(":", 1)
                             send_hotr(f"{key} = {val}")
@@ -174,6 +190,9 @@ def main():
                         handled = True
                         break
 
+    # Batocera may SIGTERM this bridge before the emulator control pipe gets
+    # a chance to send CLOSE. Guarantee one final stop event for HOTR.
+    send_stop()
     log.write("MameOutputSender exiting\n")
     log.close()
 

@@ -1,0 +1,41 @@
+Players
+2
+P1
+P2
+Recoil & Reload
+Ammo_Value 0
+Recoil 1
+Recoil_R2S 0
+Recoil_Value 0
+[States]
+:mame_start
+*All
+>Open_COM_NoInit
+>Joystick_Mode
+>Open_COM
+:mame_stop
+*All
+>Close_COM_InitOnly
+>Keyboard_Mouse_Mode
+>Close_COM_NoInit
+[Signals]
+:TriggerPress_P1
+*P1
+#Recoil
+:TriggerPress_P2
+*P2
+#Recoil
+:TriggerPress_P3
+:TriggerPress_P4
+:Rumble_P1
+*P1
+>Shake
+:Rumble_P2
+*P2
+>Shake
+:Rumble_P3
+:Rumble_P4
+:GunRecoil_P1
+:GunRecoil_P2
+:GunRecoil_P3
+:GunRecoil_P4

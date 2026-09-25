@@ -1,0 +1,43 @@
+Players
+2
+P1
+P2
+Recoil & Reload
+Ammo_Value 0
+Recoil 1
+Recoil_R2S 0
+Recoil_Value 1
+[States]
+:mame_start
+*All
+>Open_COM
+:mame_stop
+*All
+>Close_COM
+[Signals]
+:Lmp_SeatDownLight
+:Lmp_TMolding_B
+:Lmp_TMolding_G
+:Lmp_TMolding_R
+:P1_Credits
+:P1_CtmRecoil
+*P1
+#Recoil
+#Recoil_Value
+:P1_LmpStart
+:P1_Lmp_SeatMarquee
+:P1_Lmp_SeatPuck
+:P1_Lmp_SeatSpeaker_B
+:P1_Lmp_SeatSpeaker_O
+:P1_Lmp_SeatSpeaker_R
+:P2_Credits
+:P2_CtmRecoil
+*P2
+#Recoil
+#Recoil_Value
+:P2_LmpStart
+:P2_Lmp_SeatMarquee
+:P2_Lmp_SeatPuck
+:P2_Lmp_SeatSpeaker_B
+:P2_Lmp_SeatSpeaker_O
+:P2_Lmp_SeatSpeaker_R

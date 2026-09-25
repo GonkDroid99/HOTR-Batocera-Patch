@@ -1,0 +1,53 @@
+Players
+4
+P1
+P2
+P3
+P4
+Recoil & Reload
+Ammo_Value 0
+Recoil 0
+Recoil_R2S 1
+Recoil_Value 0
+[States]
+:mame_start
+*All
+>Open_COM
+:mame_stop
+*All
+>Close_COM
+[Signals]
+:P1_OuterWater
+*P1
+#Recoil_R2S
+:P2_OuterWater
+*P2
+#Recoil_R2S
+:P3_OuterWater
+*P3
+#Recoil_R2S
+:P4_OuterWater
+*P4
+#Recoil_R2S
+:P1_Damaged
+*P1
+>Damage
+:P2_Damaged
+*P2
+>Damage
+:P3_Damaged
+*P3
+>Damage
+:P4_Damaged
+*P4
+>Damage
+:P1_LmpGun
+:P2_LmpGun
+:P3_LmpGun
+:P4_LmpGun
+:Lmp_Disinfection
+:Lmp_Marquee_1
+:P1_Credits
+:P1_InnerWater
+:P2_InnerWater
+:Lmp_Marquee_2

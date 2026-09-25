@@ -23,8 +23,6 @@ PCSX2_LIGHTGUN_DEPENDENCIES += libaio libbacktrace libcurl libgtk3 libpcap libpn
 PCSX2_LIGHTGUN_DEPENDENCIES += libsoundtouch plutosvg portaudio qt6base qt6svg qt6tools
 PCSX2_LIGHTGUN_DEPENDENCIES += rapidyaml shaderc sdl3 webp wxwidgets xorgproto yaml-cpp zlib
 
-
-
 # Use clang for performance (same as upstream pcsx2)
 PCSX2_LIGHTGUN_CONF_OPTS += -DCMAKE_C_COMPILER=$(HOST_DIR)/bin/clang
 PCSX2_LIGHTGUN_CONF_OPTS += -DCMAKE_CXX_COMPILER=$(HOST_DIR)/bin/clang++

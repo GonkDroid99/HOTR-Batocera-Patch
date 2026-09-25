@@ -1,10 +1,26 @@
-# Binary payload release
+# Binary release workflow
 
-The Git repo intentionally excludes large binaries. Create/update the prerelease `binaries-v1` with:
+Large runtime binaries are stored in the `binaries-v1` GitHub prerelease and are not committed to the normal repository history.
 
-- `duckstation-hotr.tar.gz` — native Batocera 43 Buildroot output
-- `pcsx2-hotr.tar.gz` — native Batocera 43 Buildroot output
-- `Hook_of_the_Reaper-x86_64.AppImage` — HOTR AppImage built on the compatible Ubuntu baseline
-- `SHA256SUMS`
+Required assets:
 
-Build the two emulator archives with `./buildroot/build-emulators.sh`, then publish them with `./scripts/publish-binaries-release.sh`. A normal `v*` tag triggers GitHub Actions to download `binaries-v1`, assemble the complete installer ZIP, and publish it.
+```text
+duckstation-hotr.tar.gz
+pcsx2-hotr.tar.gz
+Hook_of_the_Reaper-x86_64.AppImage
+SHA256SUMS
+```
+
+The emulator archives must be the Batocera 43.1 Buildroot-native outputs. PCSX2 must include its private `lib/` directory (including `libryml.so.0.12.1`) beside the executable tree.
+
+Publish/update the prerelease with:
+
+```bash
+./scripts/publish-binaries-release.sh \
+  binaries-v1 \
+  dist/buildroot-binaries/duckstation-hotr.tar.gz \
+  dist/buildroot-binaries/pcsx2-hotr.tar.gz \
+  /path/to/Hook_of_the_Reaper-x86_64.AppImage
+```
+
+Then push a normal `v*` tag. `.github/workflows/release.yml` verifies `SHA256SUMS`, assembles the runtime payload, runs `build-release.sh`, and publishes `HOTR-Batocera43-x86_64.zip` plus its checksum.

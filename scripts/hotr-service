@@ -1,27 +1,105 @@
 #!/bin/bash
-# Batocera user service for Hook of the Reaper.
+# Batocera user service for Hook of the Reaper AppImage.
 set -u
 ROOT=/userdata/system/hotr
-DAEMON="$ROOT/hook-of-the-reaper/hook-of-the-reaper"
+APPDIR="$ROOT/software/hook-of-the-reaper"
+DAEMON="$APPDIR/hook-of-the-reaper"
 AUTOCONFIG="$ROOT/bin/hotr-autoconfig.py"
-PIDFILE=/var/run/hook-of-the-reaper.pid
 LOGFILE=/userdata/system/logs/hook-of-the-reaper.log
-DATADIR="$ROOT/hook-of-the-reaper/data"
-LGDIR="$ROOT/hook-of-the-reaper/defaultLG"
+DATADIR=/userdata/system/hook-of-the-reaper/data
+
 mkdir -p /userdata/system/logs
+
+proc_cmdline() {
+  tr '\0' ' ' < "/proc/$1/cmdline" 2>/dev/null || true
+}
+
+# An AppImage launch has two processes. Only the mounted payload is the HOTR
+# application instance; the persistent-path process is the AppImage runtime.
+hotr_pids() {
+  local p pid cmd
+  for p in /proc/[0-9]*; do
+    pid="${p##*/}"
+    cmd="$(proc_cmdline "$pid")"
+    case "$cmd" in
+      /tmp/.mount_hook-*/usr/bin/HookOfTheReaper\ --no-ui*) printf '%s\n' "$pid" ;;
+    esac
+  done
+}
+
+hotr_runtime_pids() {
+  local p pid cmd
+  for p in /proc/[0-9]*; do
+    pid="${p##*/}"
+    cmd="$(proc_cmdline "$pid")"
+    case "$cmd" in
+      "$DAEMON"\ --no-ui*) printf '%s\n' "$pid" ;;
+    esac
+  done
+}
+
+hotr_running() {
+  [ -n "$(hotr_pids)" ]
+}
+
+cleanup_stale_qipc() {
+  hotr_running && return 0
+  rm -f /tmp/qipc_sharedmemory_HookOfTheReaper* \
+        /tmp/qipc_systemsem_HookOfTheReaper* 2>/dev/null || true
+}
+
 start_hotr() {
-  export DISPLAY=:0.0 HOME=/userdata/system XDG_CONFIG_HOME=/userdata/system/configs
   [ -x "$DAEMON" ] || { echo "HOTR executable missing: $DAEMON" >>"$LOGFILE"; return 1; }
+  hotr_running && return 0
+
+  cleanup_stale_qipc
   [ -x "$AUTOCONFIG" ] && python3 "$AUTOCONFIG" >>"$LOGFILE" 2>&1 || true
-  if ! pgrep -f "$DAEMON" >/dev/null 2>&1; then
-    (cd "$ROOT/hook-of-the-reaper" && HOTR_DATA_DIR="$DATADIR" nohup "$DAEMON" --no-ui >>"$LOGFILE" 2>&1 & echo $! >"$PIDFILE")
-  fi
+
+  export DISPLAY=:0
+  export HOME=/userdata/system
+  export XDG_CONFIG_HOME=/userdata/system/configs
+  export QT_QPA_PLATFORM=xcb
+  export HOTR_DATA_DIR="$DATADIR"
+  unset XDG_RUNTIME_DIR
+
+  cd "$APPDIR" || return 1
+  nohup "$DAEMON" --no-ui >>"$LOGFILE" 2>&1 &
+
   [ -x "$ROOT/scripts/custom-boot.sh" ] && "$ROOT/scripts/custom-boot.sh" >>"$LOGFILE" 2>&1 || true
 }
+
 stop_hotr() {
-  [ -f "$PIDFILE" ] && kill "$(cat "$PIDFILE")" 2>/dev/null || true
-  pkill -f "$DAEMON" 2>/dev/null || true
-  rm -f "$PIDFILE"
+  local pids pid runtime tries
+  pids="$(hotr_pids)"
+  for pid in $pids; do kill -TERM "$pid" 2>/dev/null || true; done
+
+  tries=0
+  while hotr_running && [ "$tries" -lt 10 ]; do
+    sleep 1
+    tries=$((tries + 1))
+  done
+  if hotr_running; then
+    for pid in $(hotr_pids); do kill -KILL "$pid" 2>/dev/null || true; done
+  fi
+
+  # Normally the AppImage runtime exits with its payload. Clean up a stranded
+  # runtime only after the real HOTR payload has gone away.
+  for runtime in $(hotr_runtime_pids); do kill -TERM "$runtime" 2>/dev/null || true; done
+
   [ -x "$ROOT/scripts/custom-stop.sh" ] && "$ROOT/scripts/custom-stop.sh" >>"$LOGFILE" 2>&1 || true
 }
-case "${1:-}" in start) start_hotr ;; stop) stop_hotr ;; restart|reload) stop_hotr; sleep 1; start_hotr ;; status) pgrep -af "$DAEMON" || exit 1 ;; *) echo "Usage: $0 {start|stop|restart|status}"; exit 2;; esac
+
+status_hotr() {
+  local pids
+  pids="$(hotr_pids)"
+  [ -n "$pids" ] || return 1
+  for pid in $pids; do printf '%s ' "$pid"; proc_cmdline "$pid"; printf '\n'; done
+}
+
+case "${1:-}" in
+  start) start_hotr ;;
+  stop) stop_hotr ;;
+  restart|reload) stop_hotr; sleep 1; start_hotr ;;
+  status) status_hotr ;;
+  *) echo "Usage: $0 {start|stop|restart|status}"; exit 2 ;;
+esac

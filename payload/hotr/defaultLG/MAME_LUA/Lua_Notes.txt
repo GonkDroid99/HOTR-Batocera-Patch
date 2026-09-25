@@ -1,0 +1,28 @@
+You need to have the Lua scripts to then output the data for the light gun force feedback. Usually the Lua scripts go into the 'scripts' directory in MAME. 
+
+Option 1 (one off):
+To load the lua script, please see the example below.
+mame.exe area51 -autoboot_script "D:\MAME\scripts\area51.lua"
+
+Option 2 (permanent):
+In the 'ini' directory in MAME, create an INI file with the ROM's name. Area 51, would be 'area51.ini' file. Then boot the info below into the INI file.
+autoboot_script "scripts/area51.lua"
+
+Or Use with Full Path
+autoboot_script "D:\Path\To\MAME\scripts\area51.lua"
+
+
+To change the recoil or damage pulse duration, change these values in the lua script.
+RECOIL_PULSE_DURATION_MS 	: Duration (in Milliseconds) of the "recoil" signal for your solenoid/motor
+DAMAGED_PULSE_DURATION_MS	: Duration (in Milliseconds) of the "damaged" signal for your motor/light/whatever
+
+I have modified some of the lua scripts. If you don't have the modified version of the scripts, then below problems will happen. 
+
+Area51 - Blocks outputs during boot up, so don't get fake recoil or rumble.
+Beast Busters 2 - Blocks outputs during boot up, so don't get fake recoil or rumble.
+CarnEvil - Fixed Life and Damage output signals, and now working. Blocks outputs during boot up, so don't get fake recoil or rumble.
+Crypt Killer - Added in player 3, as only player 1 & 2 had output signals. Blocks outputs during boot up, so don't get fake recoil or rumble.
+Invasion: The Abduction - Blocks outputs during boot up, so don't get fake recoil or rumble.
+Judge Dredd - Player 2 now doesn't block the output signals.
+Maximum Force - Blocks outputs during boot up, so don't get fake recoil or rumble.
+Steel Gunner - Clean up the output signals, as many signals are not used.

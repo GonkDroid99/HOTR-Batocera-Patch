@@ -1,0 +1,65 @@
+Players
+2
+P1
+P2
+Recoil & Reload
+Ammo_Value 1 Ammo_Value
+Recoil 1 Reload_Value
+Recoil_R2S 0
+Recoil_Value 1 Reload_Value
+[States]
+:mame_start
+*All
+>Open_COM
+:mame_stop
+*All
+>Close_COM
+[Signals]
+:P1_CtmRecoil
+*P1
+#Recoil
+#Recoil_Value
+:P2_CtmRecoil
+*P2
+#Recoil
+#Recoil_Value
+:P1_Damaged
+*P1
+>Damage
+:P2_Damaged
+*P2
+>Damage
+:P1_Ammo
+*P1
+#Ammo_Value
+#Reload_Value
+>Display_Ammo
+:P2_Ammo
+*P2
+#Ammo_Value
+#Reload_Value
+>Display_Ammo
+:P1_CtmLmpStart
+:P2_CtmLmpStart
+:P1_Clip
+:P2_Clip
+:P1_Life
+*P1
+>Display_Life
+>Death_Value
+:P2_Life
+*P2
+>Display_Life
+>Death_Value
+:Credits
+:P1_LmpHolder
+:P1_LmpGun_B
+:P1_LmpGunGrenade
+:P1_LmpGun
+:P2_LmpHolder
+:P2_LmpGun_B
+:P2_LmpGunGrenade
+:P2_LmpGun
+:LmpBillboard
+:P1_LmpStart
+:P2_LmpStart
