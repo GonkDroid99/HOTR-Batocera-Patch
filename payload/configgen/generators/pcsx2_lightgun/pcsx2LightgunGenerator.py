@@ -143,8 +143,12 @@ class Pcsx2LightgunGenerator(Pcsx2Generator):
         }
 
         for usb_section, gun_idx in port_map:
-            if not pcsx2_config.has_section(usb_section):
-                pcsx2_config.add_section(usb_section)
+            # completely rebuild USB section so no
+            # stale guncon2_numdevice/button/SDL mappings survive.
+            if pcsx2_config.has_section(usb_section):
+                pcsx2_config.remove_section(usb_section)
+            pcsx2_config.add_section(usb_section)
+
             player = gun_idx + 1
             gun = guns[gun_idx] if guns and gun_idx < len(guns) else None
             layout = detected_layout_name(gun)
@@ -152,8 +156,9 @@ class Pcsx2LightgunGenerator(Pcsx2Generator):
             pcsx2_config.set(usb_section, "Type", "guncon2")
             pcsx2_config.set(usb_section, "guncon2_cursor_path", "")
             pcsx2_config.set(usb_section, "guncon2_cursor_color", "#0000ff" if player == 1 else "#ff0000")
-            pcsx2_config.set(usb_section, "guncon2_numdevice", "2")
 
+
+            # leave guncon2_numdevice unset; Batocera evdev selects by USB port
             # Remove only keys owned by this HOTR mapping layer, then rebuild
             # them from the selected semantic controls.
             for key in managed_keys:
@@ -164,20 +169,31 @@ class Pcsx2LightgunGenerator(Pcsx2Generator):
                 logical = logical_for(system, "pcsx2", player, action.lower(), default)
                 value = pcsx2_button(layout, gun_idx, logical)
                 if value is not None:
-                    pcsx2_config.set(usb_section, f"guncon2_{action}", value)
+                    pass  # Native PCSX2/Batocera GunCon2 handling owns normal gun controls
 
-            for key, value in pcsx2_relative_axes(
-                gun_idx,
-                axis_mode(system, "pcsx2", player, "x"),
-                axis_mode(system, "pcsx2", player, "y"),
-            ).items():
-                pcsx2_config.set(usb_section, key, value)
+            # Match stock Batocera PCSX2: configgen explicitly supplies only
+            # the GunCon2 C/pedal key here. Other gun controls use PCSX2's
+            # native lightgun/pointer defaults.
+            pedal_keys = {1: "c", 2: "v", 3: "b", 4: "n"}
+            pedal_key = system.config.get(
+                f"controllers.pedals{player}",
+                pedal_keys.get(player, "c")
+            )
+            pcsx2_config.set(
+                usb_section,
+                "guncon2_C",
+                f"Keyboard/{pedal_key.upper()}"
+            )
+            # Native Batocera/PCSX2 GunCon2 path owns aiming.
+            # Do not create HOTR SDL Relative* mappings.
 
         active_sections = {section for section, _ in port_map}
         for usb_section in ("USB1", "USB2"):
             if usb_section not in active_sections:
-                if not pcsx2_config.has_section(usb_section):
-                    pcsx2_config.add_section(usb_section)
+                # also clear stale mappings on inactive ports.
+                if pcsx2_config.has_section(usb_section):
+                    pcsx2_config.remove_section(usb_section)
+                pcsx2_config.add_section(usb_section)
                 pcsx2_config.set(usb_section, "Type", "None")
 
         with config_path.open("w", encoding="latin-1") as f:

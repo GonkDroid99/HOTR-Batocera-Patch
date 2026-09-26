@@ -49,13 +49,11 @@ class DuckstationLightgunGenerator(DuckstationGenerator):
             settings.add_section("InputSources")
         settings.set("InputSources", "SDLControllerEnhancedMode", "true")
 
-        gun_count = len(guns) if (system.config.use_guns and guns) else count_rs3_guns()
+        gun_count = len(guns) if (system.config.use_guns and guns) else 0  # HOTR mouse-mode test: only Batocera-detected guns
 
         if guns:
             # DuckStation GunCon exposes Trigger, ShootOffscreen, A and B.
             # Keep Batocera's logical meanings but emit DuckStation SDL syntax.
-            # Confirmed RS3 defaults: trigger, rear/thumb offscreen reload,
-            # front-left A and front-right B.
             defaults = {
                 "Trigger": "trigger",
                 "ShootOffscreen": "action",
@@ -78,13 +76,13 @@ class DuckstationLightgunGenerator(DuckstationGenerator):
                         logical = logical_for(system, "duckstation", nplayer, action.lower(), default)
                         value = duckstation_button(layout, sdl_index, logical)
                         if value is not None:
-                            settings.set(pad_num, action, value)
+                            pass  # Batocera DuckStation evdev patch owns gun buttons/aim
                     for key, value in duckstation_relative_axes(
                         sdl_index,
                         axis_mode(system, "duckstation", nplayer, "x"),
                         axis_mode(system, "duckstation", nplayer, "y"),
                     ).items():
-                        settings.set(pad_num, key, value)
+                        pass  # Batocera DuckStation evdev patch owns gun buttons/aim
 
         for nplayer in range(gun_count + 1, 9):
             pad_num = f"Pad{nplayer}"

@@ -30,8 +30,8 @@ grep -q 'batocera.linux 43' "$BATOCERA_TREE/batocera-Changelog.md" || echo "WARN
 
 # Stage custom source INSIDE the Batocera tree so its build Docker container can see it.
 mkdir -p "$BATOCERA_TREE/.hotr-sources"
-rsync -a --delete --exclude '.git' --exclude 'build*' "$DUCKSTATION_SOURCE/" "$BATOCERA_TREE/.hotr-sources/duckstation-lightgun-src/"
-rsync -a --delete --exclude '.git' --exclude 'build*' "$PCSX2_SOURCE/" "$BATOCERA_TREE/.hotr-sources/pcsx2-lightgun-src/"
+rsync -a --delete  --exclude '.git/' --exclude 'build*/' "$DUCKSTATION_SOURCE/" "$BATOCERA_TREE/.hotr-sources/duckstation-lightgun-src/"
+rsync -a --delete --exclude '.git/' --exclude 'build*/'  "$PCSX2_SOURCE/" "$BATOCERA_TREE/.hotr-sources/pcsx2-lightgun-src/"
 
 # Install the old known-working package recipes/patches into the Batocera tree.
 mkdir -p "$BATOCERA_TREE/package/batocera/emulators" "$BATOCERA_TREE/package/batocera/libraries/rapidyaml"
@@ -43,11 +43,17 @@ rsync -a --delete "$HERE/recipes/package/batocera/libraries/rapidyaml/" "$BATOCE
 # top-level Makefile exposes <target>-pkg specifically for individual packages.
 # First invocation may still build/download the required toolchain + dependencies.
 cd "$BATOCERA_TREE"
-echo "=== Building DuckStation LightGun for $BATOCERA_TARGET ==="
-make "${BATOCERA_TARGET}-pkg" PKG=duckstation-lightgun
+
+echo "=== Cleaning previous HOTR emulator builds ==="
+rm -rf "$BATOCERA_TREE/output/$BATOCERA_TARGET/build/duckstation-lightgun-"*
+rm -rf "$BATOCERA_TREE/output/$BATOCERA_TARGET/build/pcsx2-lightgun-"*
 
 echo "=== Building PCSX2 LightGun for $BATOCERA_TARGET ==="
 make "${BATOCERA_TARGET}-pkg" PKG=pcsx2-lightgun
+
+echo "=== Building DuckStation LightGun for $BATOCERA_TARGET ==="
+make "${BATOCERA_TARGET}-pkg" PKG=duckstation-lightgun
+
 
 TARGET="$BATOCERA_TREE/output/$BATOCERA_TARGET/target"
 DIST="$ROOT/dist/buildroot-binaries"
