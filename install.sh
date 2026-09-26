@@ -167,6 +167,7 @@ IMPORTER="$GENROOT/importer.py"; [ -f "$IMPORTER" ] || die "configgen importer.p
 cp -a "$BASE/payload/configgen/generators/duckstation_lightgun" "$GENROOT/"
 cp -a "$BASE/payload/configgen/generators/pcsx2_lightgun" "$GENROOT/"
 cp -a "$BASE/payload/configgen/generators/lightgun_rs3.py" "$GENROOT/"
+cp -a "$BASE/payload/configgen/generators/hotr_lightgun_mapping.py" "$GENROOT/"
 python3 - "$IMPORTER" <<'PY'
 from pathlib import Path
 import sys

@@ -53,6 +53,89 @@ def add_output_switch(core, setting):
     ET.SubElement(f,'choice',{'name':'Enabled','value':'true'})
     ET.SubElement(f,'choice',{'name':'Disabled','value':'false'})
 
+
+
+def add_hotr_button_feature(core, emulator, player, action, label, default_label):
+    key = f"hotr_{emulator}_p{player}_{action}"
+    if any(x.get('value') == key for x in core.findall('feature')):
+        return
+    f = ET.SubElement(core, 'feature', {
+        'name': f'P{player} {label}',
+        'group': f'HOTR P{player} CONTROLS',
+        'value': key,
+        'description': 'Map this emulator action to a friendly physical light-gun control. HOTR translates it to the detected gun SDL device.'
+    })
+    # Values remain stable logical identifiers; only the ES labels expose the
+    # physical RS3 names confirmed during live testing. This lets additional
+    # gun layouts reuse the same emulator-facing settings later.
+    choices = [
+        (f'Default ({default_label})', 'default'),
+        ('Trigger', 'trigger'),
+        ('Rear / Thumb', 'action'),
+        ('Front Left', 'start'),
+        ('Front Right', 'select'),
+        ('Palm', 'sub1'),
+        ('Stick Press', 'sub2'),
+        ('D-Pad Up', 'up'),
+        ('D-Pad Down', 'down'),
+        ('D-Pad Left', 'left'),
+        ('D-Pad Right', 'right'),
+        ('Disabled', 'disabled'),
+    ]
+    for name, value in choices:
+        ET.SubElement(f, 'choice', {'name': name, 'value': value})
+
+
+def add_hotr_axis_feature(core, emulator, player, axis):
+    key = f"hotr_{emulator}_p{player}_aim_{axis}"
+    if any(x.get('value') == key for x in core.findall('feature')):
+        return
+    f = ET.SubElement(core, 'feature', {
+        'name': f'P{player} AIM {axis.upper()}',
+        'group': f'HOTR P{player} CONTROLS',
+        'value': key,
+        'description': f'Bind relative aiming to SDL Axis {0 if axis == "x" else 1}.'
+    })
+    ET.SubElement(f, 'choice', {'name': 'Normal (Default)', 'value': 'normal'})
+    ET.SubElement(f, 'choice', {'name': 'Inverted', 'value': 'inverted'})
+    ET.SubElement(f, 'choice', {'name': 'Disabled', 'value': 'disabled'})
+
+
+def add_duckstation_hotr_controls(core):
+    actions = [
+        ('trigger', 'TRIGGER', 'Trigger'),
+        ('shootoffscreen', 'SHOOT OFFSCREEN / RELOAD', 'Rear / Thumb'),
+        ('a', 'GUNCON A', 'Front Left'),
+        ('b', 'GUNCON B', 'Front Right'),
+    ]
+    for player in (1, 2):
+        for action, label, default_label in actions:
+            add_hotr_button_feature(core, 'duckstation', player, action, label, default_label)
+        add_hotr_axis_feature(core, 'duckstation', player, 'x')
+        add_hotr_axis_feature(core, 'duckstation', player, 'y')
+
+
+def add_pcsx2_hotr_controls(core):
+    actions = [
+        ('trigger', 'TRIGGER', 'Trigger'),
+        ('shootoffscreen', 'SHOOT OFFSCREEN', 'Disabled'),
+        ('a', 'GUNCON A', 'Front Left'),
+        ('b', 'GUNCON B', 'Front Right'),
+        ('c', 'GUNCON C / PEDAL', 'Rear / Thumb'),
+        ('recalibrate', 'RECALIBRATE', 'Palm'),
+        ('start', 'GUNCON START', 'Stick Press'),
+        ('select', 'GUNCON SELECT', 'Front Right'),
+        ('up', 'GUNCON UP', 'D-Pad Up'),
+        ('down', 'GUNCON DOWN', 'D-Pad Down'),
+        ('left', 'GUNCON LEFT', 'D-Pad Left'),
+        ('right', 'GUNCON RIGHT', 'D-Pad Right'),
+    ]
+    for player in (1, 2):
+        for action, label, default_label in actions:
+            add_hotr_button_feature(core, 'pcsx2', player, action, label, default_label)
+        add_hotr_axis_feature(core, 'pcsx2', player, 'x')
+        add_hotr_axis_feature(core, 'pcsx2', player, 'y')
+
 def append_feature_flags(core, flags):
     current=core.get('features','').split()
     for flag in flags:
@@ -67,6 +150,7 @@ duck, dcore = clone_feature_target('duckstation')
 duck.set('name','duckstation')
 append_feature_flags(dcore,['use_guns'])
 add_output_switch(dcore,'duckstation_mamehooker')
+add_duckstation_hotr_controls(dcore)
 out.append(duck)
 
 # PCSX2: start from current Batocera 43 PCSX2 options.
@@ -86,6 +170,7 @@ if LEGACY.exists():
         if feature.get('value') not in existing:
             pcore.append(deepcopy(feature)); existing.add(feature.get('value'))
 add_output_switch(pcore,'pcsx2_mamehooker')
+add_pcsx2_hotr_controls(pcore)
 out.append(pcsx)
 
 DEST.parent.mkdir(parents=True, exist_ok=True)

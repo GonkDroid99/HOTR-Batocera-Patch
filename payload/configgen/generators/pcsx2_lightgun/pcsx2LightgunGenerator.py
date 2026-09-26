@@ -6,6 +6,9 @@ from typing import Final
 from ...batoceraPaths import CONFIGS
 from ...utils.configparser import CaseSensitiveConfigParser
 from ..lightgun_rs3 import count_rs3_guns
+from ..hotr_lightgun_mapping import (
+    axis_mode, detected_layout_name, logical_for, pcsx2_button, pcsx2_relative_axes,
+)
 from ..pcsx2.pcsx2Generator import Pcsx2Generator
 
 _PCSX2_LIGHTGUN_BIN_DIR: Final = Path("/userdata/system/hotr/emulators/pcsx2")
@@ -106,35 +109,68 @@ class Pcsx2LightgunGenerator(Pcsx2Generator):
         if gun_count >= 2 or gun1onport2:
             port_map.append(("USB2", 0 if gun1onport2 else 1))
 
-        # RS3 joystick-mode mapping verified on Batocera 43.1.
-        # P1 -> SDL-0, P2 -> SDL-1. Relative axes provide accurate aiming.
+        # HOTR uses Batocera logical light-gun controls, translated to the
+        # SDL device exposed while the gun is in HOTR joystick mode. ES options
+        # can override each GunCon2 action per player/per game.
+        managed_keys = (
+            "guncon2_C", "guncon2_A", "guncon2_B", "guncon2_Trigger",
+            "guncon2_Up", "guncon2_Left", "guncon2_Right", "guncon2_Down",
+            "guncon2_ShootOffscreen", "guncon2_RelativeDown",
+            "guncon2_RelativeLeft", "guncon2_RelativeRight",
+            "guncon2_RelativeUp", "guncon2_Recalibrate", "guncon2_Start",
+            "guncon2_Select",
+        )
+        # Defaults mirror Batocera's global light-gun semantics: trigger,
+        # action, start/select, SUB buttons and d-pad. In particular PCSX2's
+        # stock mapping uses Action for C/pedal, Start for A, Select for B,
+        # SUB1 for recalibration and SUB2 for GunCon Start.
+        action_defaults = {
+            "Trigger": "trigger",
+            # Time Crisis II needs rear/thumb exclusively for GunCon C/pedal.
+            # Sharing it with ShootOffscreen makes menu shooting work but breaks
+            # normal gameplay, so offscreen shooting is opt-in for PCSX2.
+            "ShootOffscreen": "disabled",
+            "C": "action",
+            "A": "start",
+            "B": "select",
+            "Recalibrate": "sub1",
+            "Start": "sub2",
+            "Select": "select",
+            "Up": "up",
+            "Down": "down",
+            "Left": "left",
+            "Right": "right",
+        }
+
         for usb_section, gun_idx in port_map:
             if not pcsx2_config.has_section(usb_section):
                 pcsx2_config.add_section(usb_section)
-            sdl = f"SDL-{gun_idx}"
-            bindings = {
-                "Type": "guncon2",
-                "guncon2_cursor_path": "",
-                "guncon2_cursor_color": "#0000ff",
-                "guncon2_C": f"{sdl}/JoyButton3",
-                "guncon2_numdevice": "2",
-                "guncon2_A": f"{sdl}/JoyButton2",
-                "guncon2_B": f"{sdl}/JoyButton5",
-                "guncon2_Trigger": f"{sdl}/JoyButton0",
-                "guncon2_Up": f"{sdl}/Hat0North",
-                "guncon2_Left": f"{sdl}/Hat0West",
-                "guncon2_Right": f"{sdl}/Hat0East",
-                "guncon2_Down": f"{sdl}/Hat0South",
-                "guncon2_ShootOffscreen": f"{sdl}/JoyButton1",
-                "guncon2_RelativeDown": f"{sdl}/+JoyAxis1",
-                "guncon2_RelativeLeft": f"{sdl}/-JoyAxis0",
-                "guncon2_RelativeRight": f"{sdl}/+JoyAxis0",
-                "guncon2_RelativeUp": f"{sdl}/-JoyAxis1",
-                "guncon2_Recalibrate": f"{sdl}/JoyButton2",
-                "guncon2_Start": f"{sdl}/JoyButton2",
-                "guncon2_Select": f"{sdl}/JoyButton5",
-            }
-            for key, value in bindings.items():
+            player = gun_idx + 1
+            gun = guns[gun_idx] if guns and gun_idx < len(guns) else None
+            layout = detected_layout_name(gun)
+
+            pcsx2_config.set(usb_section, "Type", "guncon2")
+            pcsx2_config.set(usb_section, "guncon2_cursor_path", "")
+            pcsx2_config.set(usb_section, "guncon2_cursor_color", "#0000ff" if player == 1 else "#ff0000")
+            pcsx2_config.set(usb_section, "guncon2_numdevice", "2")
+
+            # Remove only keys owned by this HOTR mapping layer, then rebuild
+            # them from the selected semantic controls.
+            for key in managed_keys:
+                if pcsx2_config.has_option(usb_section, key):
+                    pcsx2_config.remove_option(usb_section, key)
+
+            for action, default in action_defaults.items():
+                logical = logical_for(system, "pcsx2", player, action.lower(), default)
+                value = pcsx2_button(layout, gun_idx, logical)
+                if value is not None:
+                    pcsx2_config.set(usb_section, f"guncon2_{action}", value)
+
+            for key, value in pcsx2_relative_axes(
+                gun_idx,
+                axis_mode(system, "pcsx2", player, "x"),
+                axis_mode(system, "pcsx2", player, "y"),
+            ).items():
                 pcsx2_config.set(usb_section, key, value)
 
         active_sections = {section for section, _ in port_map}
