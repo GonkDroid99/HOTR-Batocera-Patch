@@ -6,7 +6,7 @@ MODE="${1:---auto}"
 HOTR=/userdata/system/hotr
 HOTR_DATA=/userdata/system/hook-of-the-reaper
 LOG=/userdata/system/logs/hotr-install.log
-GENROOT=/usr/lib/python3.12/site-packages/configgen/generators
+GENROOT="$(printf '%s\n' /usr/lib/python*/site-packages/configgen/generators | sort -V | while read -r candidate; do [ -d "$candidate" ] && printf '%s\n' "$candidate"; done | tail -n1)"
 
 msg(){ printf '[HOTR] %s\n' "$*"; }
 warn(){ printf '[HOTR WARNING] %s\n' "$*" >&2; }
@@ -176,7 +176,7 @@ set_conf ps2-hotr.use_guns 1
 set_conf ps2-hotr.pcsx2_mamehooker true
 
 # Patch Batocera 43.1 configgen. These small rootfs changes are persisted by overlay.
-[ -d "$GENROOT" ] || die "Batocera 43.1 configgen generators directory not found: $GENROOT"
+[ -n "$GENROOT" ] || die "Batocera configgen generators directory not found under /usr/lib/python*/site-packages"
 IMPORTER="$GENROOT/importer.py"; [ -f "$IMPORTER" ] || die "configgen importer.py not found."
 [ -f "$HOTR/backups/importer.py.original" ] || cp -a "$IMPORTER" "$HOTR/backups/importer.py.original"
 cp -a "$BASE/payload/configgen/generators/duckstation_lightgun" "$GENROOT/"

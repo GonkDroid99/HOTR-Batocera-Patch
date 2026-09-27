@@ -1,7 +1,7 @@
 #!/bin/bash
 set -u
 ok=1
-GENROOT=/usr/lib/python3.12/site-packages/configgen/generators
+GENROOT="$(printf '%s\n' /usr/lib/python*/site-packages/configgen/generators | sort -V | while read -r candidate; do [ -d "$candidate" ] && printf '%s\n' "$candidate"; done | tail -n1)"
 check(){ if [ -e "$1" ] || [ -L "$1" ]; then echo "[OK] $1"; else echo "[MISSING] $1"; ok=0; fi; }
 check_exec(){ if [ -x "$1" ]; then echo "[OK] executable $1"; else echo "[MISSING] executable $1"; ok=0; fi; }
 

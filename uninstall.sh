@@ -2,7 +2,7 @@
 set -euo pipefail
 BASE="$(cd "$(dirname "$0")" && pwd)"
 HOTR=/userdata/system/hotr
-GENROOT=/usr/lib/python3.12/site-packages/configgen/generators
+GENROOT="$(printf '%s\n' /usr/lib/python*/site-packages/configgen/generators | sort -V | while read -r candidate; do [ -d "$candidate" ] && printf '%s\n' "$candidate"; done | tail -n1)"
 [ "$(id -u)" -eq 0 ] || { echo 'Run as root.'; exit 1; }
 
 command -v batocera-services >/dev/null && batocera-services disable hotr 2>/dev/null || true
