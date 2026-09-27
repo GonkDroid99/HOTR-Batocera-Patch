@@ -6,7 +6,7 @@ HOTR=/userdata/system/hotr
 HOTR_DATA=/userdata/system/hook-of-the-reaper
 MAME_CONFIG=/userdata/system/configs/mame
 MAME_SAVES=/userdata/saves/mame
-GENROOT=/usr/lib/python3.12/site-packages/configgen/generators
+GENROOT="$(printf '%s\n' /usr/lib/python*/site-packages/configgen/generators | sort -V | while read -r candidate; do [ -d "$candidate" ] && printf '%s\n' "$candidate"; done | tail -n1)"
 MAME_GEN="$GENROOT/mame/mameGenerator.py"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT

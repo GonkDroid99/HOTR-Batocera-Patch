@@ -187,16 +187,26 @@ python3 - "$IMPORTER" <<'PY'
 from pathlib import Path
 import sys
 p=Path(sys.argv[1]); s=p.read_text()
-duck="        'duckstation-lightgun': ('duckstation_lightgun.duckstationLightgunGenerator', 'DuckstationLightgunGenerator'),\n"
+duck_line="        'duckstation-lightgun': ('duckstation_lightgun.duckstationLightgunGenerator', 'DuckstationLightgunGenerator'),\n"
+legacy_start=s.find('_LEGACY_GENERATOR_MAP')
+if legacy_start < 0:
+    raise SystemExit('Cannot find configgen legacy generator map in importer.py')
 if "'duckstation-lightgun': ('duckstation_lightgun.duckstationLightgunGenerator'" not in s:
-    marker="'duckstation': {"; i=s.find(marker)
-    if i < 0: raise SystemExit("Cannot find duckstation legacy map in importer.py")
-    brace=s.find("{",i)+1; s=s[:brace]+"\n"+duck+s[brace:]
+    duck_marker="'duckstation': {"
+    duck_pos=s.find(duck_marker, legacy_start)
+    if duck_pos >= 0:
+        brace=s.find('{', duck_pos)+1
+        s=s[:brace]+"\n"+duck_line+s[brace:]
+    else:
+        map_brace=s.find('{', legacy_start)+1
+        entry="\n    'duckstation': {\n"+duck_line+"    },\n"
+        s=s[:map_brace]+entry+s[map_brace:]
 if "'pcsx2-lightgun': {" not in s:
-    marker="    'supermodel': {"; i=s.find(marker)
-    if i < 0: raise SystemExit("Cannot find insertion point in importer.py")
-    block="    'pcsx2-lightgun': {\n        'pcsx2-lightgun': ('pcsx2_lightgun.pcsx2LightgunGenerator', 'Pcsx2LightgunGenerator'),\n    },\n"
-    s=s[:i]+block+s[i:]
+    legacy_end=s.find('\n}\n\n_GENERATOR_MAP', legacy_start)
+    if legacy_end < 0:
+        raise SystemExit('Cannot locate end of configgen legacy generator map in importer.py')
+    block="\n    'pcsx2-lightgun': {\n        'pcsx2-lightgun': ('pcsx2_lightgun.pcsx2LightgunGenerator', 'Pcsx2LightgunGenerator'),\n    },"
+    s=s[:legacy_end]+block+s[legacy_end:]
 p.write_text(s)
 PY
 

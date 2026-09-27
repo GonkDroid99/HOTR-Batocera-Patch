@@ -36,6 +36,10 @@ payload, and the local Buildroot emulator toolchain.
 build. Use `buildroot/build-emulators.sh` to produce the PCSX2 and DuckStation
 archives consumed by the release payload.
 
+Runtime configgen paths are discovered from `/usr/lib/python*/site-packages`
+at install/check/uninstall time; the project does not require a fixed Python
+minor version.
+
 ## Legacy files
 
 The following are retained as historical references but are not installed by
