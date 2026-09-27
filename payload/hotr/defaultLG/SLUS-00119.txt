@@ -10,7 +10,7 @@ Recoil_Value 0
 :mame_start
 *All
 >Open_COM_NoInit
->Joystick_Mode
+>Keyboard_Mouse_Mode
 >Open_COM
 :mame_stop
 *All
