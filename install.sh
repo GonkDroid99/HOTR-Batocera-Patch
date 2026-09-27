@@ -26,6 +26,13 @@ echo "$VER" | grep -Eq '(^|[^0-9])43([.]|[^0-9]|$)' || warn "Designed/tested for
 mkdir -p "$HOTR"/{bin,emulators/duckstation,emulators/pcsx2,scripts,software/hook-of-the-reaper,backups,install,tools} \
          "$HOTR_DATA"/{data,defaultLG} /userdata/system/services /userdata/system/configs/emulationstation /userdata/roms/ports
 
+# Seed the PCSX2 patch archive for the HOTR build without overwriting a
+# user-maintained archive already present in the normal Batocera BIOS path.
+if [ -f "$BASE/payload/bios/ps2/patches.zip" ]; then
+  mkdir -p /userdata/bios/ps2
+  [ -f /userdata/bios/ps2/patches.zip ] || cp -a "$BASE/payload/bios/ps2/patches.zip" /userdata/bios/ps2/patches.zip
+fi
+
 fetch_latest_asset(){
   local repo="$1" regex="$2" out="$3"
   python3 - "$repo" "$regex" "$out" <<'PY'

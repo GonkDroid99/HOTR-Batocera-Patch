@@ -14,6 +14,7 @@ payload, and the local Buildroot emulator toolchain.
 | `payload/configgen/generators/` | Separate PCSX2/DuckStation configgen generators. |
 | `payload/system/hotr-autoconfig.py` | Boot/rescan device discovery and HOTR config merge. |
 | `payload/system/99-hotr.rules` | HOTR USB permissions and serial aliases. |
+| `payload/bios/ps2/patches.zip` | PCSX2 game patch archive bundled from the Buildroot output. |
 | `scripts/hotr-service` | Background HOTR service. |
 | `scripts/hotr-configgen-launch` | Emulator launcher and temporary PCSX2 fullscreen workaround. |
 | `scripts/patch-batocera-sinden.sh` | Optional Sinden patch: `apply` or `remove`; creates a backup. |
