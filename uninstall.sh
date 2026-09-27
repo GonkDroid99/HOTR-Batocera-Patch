@@ -1,11 +1,19 @@
 #!/bin/bash
 set -euo pipefail
+BASE="$(cd "$(dirname "$0")" && pwd)"
 HOTR=/userdata/system/hotr
 GENROOT=/usr/lib/python3.12/site-packages/configgen/generators
 [ "$(id -u)" -eq 0 ] || { echo 'Run as root.'; exit 1; }
 
 command -v batocera-services >/dev/null && batocera-services disable hotr 2>/dev/null || true
 /userdata/system/services/hotr stop 2>/dev/null || true
+
+# Restore stock Batocera Sinden helpers if the optional compatibility patch was
+# applied. This is independent of the HOTR installation directory.
+if [ -x "$BASE/scripts/patch-batocera-sinden.sh" ]; then
+  "$BASE/scripts/patch-batocera-sinden.sh" remove 2>/dev/null || true
+fi
+
 rm -f /userdata/system/services/hotr
 rm -f /userdata/system/configs/emulationstation/es_systems_hotr.cfg /userdata/system/configs/emulationstation/es_features_hotr.cfg
 rm -f /userdata/roms/ports/HookOfTheReaper.sh /userdata/roms/ports/HOTR-Setup.sh /userdata/roms/ports/HOTR-Rescan-Guns.sh
