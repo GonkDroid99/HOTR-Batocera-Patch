@@ -39,6 +39,10 @@ SUBSYSTEM=="tty",    ATTRS{idVendor}=="0483", ATTRS{idProduct}=="5751", MODE="06
 SUBSYSTEM=="input",  ATTRS{idVendor}=="0483", ATTRS{idProduct}=="5751", MODE="0666", GROUP="input"
 ACTION=="add", SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="5751", \
     RUN+="/bin/sh -c 'modprobe -q option; echo 0483 5751 > /sys/bus/usb-serial/drivers/option1/new_id'"
+SUBSYSTEM=="tty", ENV{ID_SERIAL}=="3AGAME_3A-3H_Retro_Shooter_1_*", ENV{ID_USB_INTERFACE_NUM}=="02", ATTRS{idProduct}=="5751", SYMLINK+="hotr/rs3reaper-gun1"
+SUBSYSTEM=="tty", ENV{ID_SERIAL}=="3AGAME_3A-3H_Retro_Shooter_2_*", ENV{ID_USB_INTERFACE_NUM}=="02", ATTRS{idProduct}=="5751", SYMLINK+="hotr/rs3reaper-gun2"
+SUBSYSTEM=="tty", ENV{ID_SERIAL}=="3AGAME_3A-3H_Retro_Shooter_3_*", ENV{ID_USB_INTERFACE_NUM}=="02", ATTRS{idProduct}=="5751", SYMLINK+="hotr/rs3reaper-gun3"
+SUBSYSTEM=="tty", ENV{ID_SERIAL}=="3AGAME_3A-3H_Retro_Shooter_4_*", ENV{ID_USB_INTERFACE_NUM}=="02", ATTRS{idProduct}=="5751", SYMLINK+="hotr/rs3reaper-gun4"
 
 # Arduino-based light guns: JB Gun4IR, Fusion, Blamcon, OpenFire, X-Gunner, Xenas, MX24, etc.
 # These appear as ttyACM devices via the standard cdc_acm driver.

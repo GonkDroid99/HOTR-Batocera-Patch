@@ -12,6 +12,7 @@ from ..hotr_lightgun_mapping import (
 
 _DUCK_HOTR_DIR = Path("/userdata/system/hotr/emulators/duckstation")
 _DUCK_HOTR_QT = _DUCK_HOTR_DIR / "duckstation-lightgun-qt"
+_DUCK_HOTR_CONFIG_DIR = CONFIGS / "duckstation-lightgun"
 
 
 class DuckstationLightgunGenerator(DuckstationGenerator):
@@ -32,10 +33,56 @@ class DuckstationLightgunGenerator(DuckstationGenerator):
             if "-fullscreen" not in cmd.array:
                 cmd.array.insert(1, "-fullscreen")
 
-        settings_path = CONFIGS / "duckstation" / "settings.ini"
+        # Keep the HOTR build independent from stock DuckStation. The custom
+        # build follows XDG_CONFIG_HOME for its settings file; its patched
+        # absolute data directories remain shared only for resources/saves.
+        cmd.env["XDG_CONFIG_HOME"] = str(_DUCK_HOTR_CONFIG_DIR.parent)
+        settings_path = _DUCK_HOTR_CONFIG_DIR / "settings.ini"
+        stock_settings_path = CONFIGS / "duckstation" / "settings.ini"
         settings = CaseSensitiveConfigParser(interpolation=None)
         if settings_path.exists():
             settings.read(settings_path)
+        elif stock_settings_path.exists():
+            # Initial baseline only. Later launches preserve the HOTR file.
+            settings.read(stock_settings_path)
+
+        # super().generate() writes the current psx-hotr options to stock
+        # DuckStation's file. Copy only Batocera-controlled options into the
+        # isolated HOTR file, preserving HOTR-only and GUI settings.
+        stock_settings = CaseSensitiveConfigParser(interpolation=None)
+        if stock_settings_path.exists():
+            stock_settings.read(stock_settings_path)
+            managed_options = {
+                "Main": (
+                    "EmulationSpeed", "SyncToHostRefreshRate", "RewindEnable",
+                    "RewindFrequency", "RewindSaveSlots",
+                ),
+                "Console": ("Region", "EnableCheats"),
+                "BIOS": ("PatchFastBoot",),
+                "CPU": ("ExecutionMode",),
+                "GPU": (
+                    "Renderer", "ThreadedPresentation", "ResolutionScale",
+                    "WidescreenHack", "ForceNTSCTimings", "TextureFilter",
+                    "PGXPEnable", "PGXPCulling", "PGXPTextureCorrection",
+                    "PGXPPreserveProjFP", "TrueColor", "ScaledDithering",
+                    "DisableInterlacing", "Multisamples",
+                ),
+                "Display": (
+                    "AspectRatio", "VSync", "CropMode", "ShowOSDMessages",
+                    "DisplayAllFrames", "IntegerScaling", "LinearFiltering",
+                    "Stretch",
+                ),
+                "Audio": ("StretchMode",),
+                "InputSources": ("SDLControllerEnhancedMode",),
+            }
+            for section, keys in managed_options.items():
+                if not stock_settings.has_section(section):
+                    continue
+                if not settings.has_section(section):
+                    settings.add_section(section)
+                for key in keys:
+                    if stock_settings.has_option(section, key):
+                        settings.set(section, key, stock_settings.get(section, key))
 
         if not settings.has_section("Main"):
             settings.add_section("Main")

@@ -112,9 +112,17 @@ case "$MODE" in
   *) die "Usage: $0 [--auto|--bundled|--github-emulators|--infrastructure-only]" ;;
 esac
 
-# HOTR AppImage + persistent data. The payload intentionally has no nested data/data directory.
-[ -f "$BASE/payload/hotr/hook-of-the-reaper" ] || die "HOTR AppImage missing from release payload."
-cp -a "$BASE/payload/hotr/hook-of-the-reaper" "$HOTR/software/hook-of-the-reaper/hook-of-the-reaper"
+ # HOTR AppImage + persistent data. The payload intentionally has no nested
+ # data/data directory. Accept both the release asset name and the normalized
+ # runtime name used inside /userdata.
+HOTR_ASSET=""
+for candidate in \
+  "$BASE/payload/hotr/hook-of-the-reaper" \
+  "$BASE/payload/hotr/Hook_of_the_Reaper-x86_64.AppImage"; do
+  if [ -f "$candidate" ]; then HOTR_ASSET="$candidate"; break; fi
+done
+[ -n "$HOTR_ASSET" ] || die "HOTR AppImage missing from release payload."
+cp -a "$HOTR_ASSET" "$HOTR/software/hook-of-the-reaper/hook-of-the-reaper"
 chmod +x "$HOTR/software/hook-of-the-reaper/hook-of-the-reaper"
 if [ ! -f "$HOTR_DATA/.seeded" ]; then
   cp -a "$BASE/payload/hotr/data"/. "$HOTR_DATA/data/"

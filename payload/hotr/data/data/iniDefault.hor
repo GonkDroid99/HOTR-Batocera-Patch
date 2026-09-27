@@ -1,9 +1,0 @@
-[General]
-MameStart=
-MameStop=
-StateChange=
-OnRotate=
-OnPause=
-[KeyStates]
-RefreshTime=
-[Output]

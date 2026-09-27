@@ -11,6 +11,7 @@ DATADIR=/userdata/system/hook-of-the-reaper/data
 mkdir -p /userdata/system/logs
 
 proc_cmdline() {
+  [ -r "/proc/$1/cmdline" ] || return 0
   tr '\0' ' ' < "/proc/$1/cmdline" 2>/dev/null || true
 }
 
@@ -53,7 +54,19 @@ start_hotr() {
   hotr_running && return 0
 
   cleanup_stale_qipc
-  [ -x "$AUTOCONFIG" ] && python3 "$AUTOCONFIG" >>"$LOGFILE" 2>&1 || true
+  if [ -x "$AUTOCONFIG" ]; then
+    # USB serial devices and the option driver can appear after the service.
+    # Retry briefly so boot does not permanently capture an empty/stale scan.
+    for attempt in $(seq 1 20); do
+      # The connected-gun set can change between boots, so boot is a forced
+      # full scan rather than a one-time initialization.
+      python3 "$AUTOCONFIG" --force >>"$LOGFILE" 2>&1 || true
+      if find -L /dev/serial/by-id /dev/serial/by-path /dev/hotr -type c -print -quit 2>/dev/null | grep -q .; then
+        break
+      fi
+      sleep 1
+    done
+  fi
 
   export DISPLAY=:0
   export HOME=/userdata/system

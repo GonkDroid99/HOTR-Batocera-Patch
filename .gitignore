@@ -27,3 +27,5 @@ UPDATE-2026-09-25.md
 BINARY_RELEASES.md
 CLEAN_EXISTING_REPO.md
 
+scripts/test-hotr-autoconfig.sh
+.gitignore

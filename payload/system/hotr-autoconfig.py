@@ -3,18 +3,21 @@
 hotr-autoconfig: Detect connected light guns and write HOTR config files.
 
 Usage:
-  hotr-autoconfig          # first-boot only — skips if config already has guns
-  hotr-autoconfig --force  # always rescans and rewrites (triggered from Ports menu)
+  hotr-autoconfig          # scans when no valid gun configuration exists
+  hotr-autoconfig --force  # always rescans and rewrites all detected guns
 
 Detection works by scanning /dev/serial/by-id/ against known product name patterns.
-Detected guns are saved using /dev/serial/by-path/ paths so the config survives
-reboots unchanged — the by-path path is stable as long as the gun stays in the
-same physical USB port.
+Detected guns are resolved to their actual /dev/tty* device node before being
+written. HOTR's serial parser rejects /dev/serial/by-path symlinks even though
+Linux itself can open them, so the boot service force-rescans every boot to
+refresh tty numbering.
 
-Supported auto-detection:
+Supported detection:
   Serial guns: RS3 Reaper, JB Gun4IR, Fusion, Blamcon, OpenFire, X-Gunner, Xenas
-  Not auto-detected (add via HOTR UI): Alien USB, AimTrak, Custom USB, RKADE,
-    MX24 (DIP-switch player numbering), Sinden (TCP), Xenas BTLE (Bluetooth)
+  HID: Alien USB, AimTrak, Custom USB
+  MX24 hubs are identified and reported, but their HOTR entry remains manual
+    because player numbering comes from the physical DIP switches.
+  Sinden (TCP), RKADE, and Xenas BTLE remain manual.
 
 To add a new auto-detectable gun: add an entry to GUN_DEFINITIONS with a by_id_re
 that matches its /dev/serial/by-id/ name.  Baud rates from Global.h BAUDDATA_ARRAY:
@@ -25,9 +28,15 @@ import os
 import re
 import sys
 
-HOTR_DATA_DIR  = "/userdata/system/hook-of-the-reaper/data"
+HOTR_DATA_DIR  = os.environ.get("HOTR_DATA_DIR", "/userdata/system/hook-of-the-reaper/data")
 LIGHTGUNS_FILE = os.path.join(HOTR_DATA_DIR, "lightguns.hor")
 PLAYERS_FILE   = os.path.join(HOTR_DATA_DIR, "playersAss.hor")
+SERIAL_BY_ID_DIR = os.environ.get("HOTR_SERIAL_BY_ID", "/dev/serial/by-id")
+SERIAL_BY_PATH_DIR = os.environ.get("HOTR_SERIAL_BY_PATH", "/dev/serial/by-path")
+HOTR_SYMLINK_DIR = os.environ.get("HOTR_DEVICE_DIR", "/dev/hotr")
+HIDRAW_DIR = os.environ.get("HOTR_HIDRAW_DIR", "/dev")
+HID_SYSFS_DIR = os.environ.get("HOTR_HID_SYSFS", "/sys/class/hidraw")
+INPUT_BY_ID_DIR = os.environ.get("HOTR_INPUT_BY_ID", "/dev/input/by-id")
 UNASSIGN       = 69
 MAX_PLAYERS    = 8
 
@@ -138,6 +147,14 @@ GUN_DEFINITIONS = {
     },
 }
 
+HID_DEFINITIONS = {
+    ("04b4", "6870"): "Alien USB",
+    ("d209", "1601"): "AimTrak",
+    ("1b4f", "9206"): "Custom USB",
+}
+
+MX24_RE = re.compile(r"MX24|Mayflash.*MX", re.IGNORECASE)
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -162,22 +179,35 @@ def _config_has_guns():
     return False
 
 
+def _config_paths_available():
+    """Return whether every saved serial device path still exists.
+
+    A by-path name is stable for a physical USB port, but the PCI portion can
+    change when a VM is restarted or its USB controller is re-enumerated.  In
+    that case the old HOTR config is syntactically valid but unusable, so boot
+    autoconfiguration must rescan instead of treating it as complete.
+    """
+    if not os.path.isfile(LIGHTGUNS_FILE):
+        return False
+    try:
+        paths = []
+        with open(LIGHTGUNS_FILE) as config:
+            for line in config:
+                line = line.strip()
+                if line.startswith("/dev/"):
+                    paths.append(line)
+        return bool(paths) and all(os.path.exists(path) for path in paths)
+    except OSError:
+        return False
+
+
 def _get_by_path(by_id_path):
     """
-    Return the /dev/serial/by-path equivalent of a /dev/serial/by-id path.
-    Both are symlinks to the same actual device (e.g. /dev/ttyACM0).
-    by-path is keyed to the physical USB port, so it survives reboots even
-    when device numbers shift.  Falls back to the by-id path if no by-path
-    entry is found.
+    Resolve a /dev/serial/by-id or /dev/hotr link to the actual tty node.
+    HOTR requires the device node itself rather than a /dev/serial symlink.
     """
     actual = os.path.realpath(by_id_path)
-    by_path_dir = "/dev/serial/by-path"
-    if os.path.isdir(by_path_dir):
-        for entry in sorted(os.listdir(by_path_dir)):
-            candidate = os.path.join(by_path_dir, entry)
-            if os.path.realpath(candidate) == actual:
-                return candidate
-    return by_id_path
+    return actual
 
 
 # ---------------------------------------------------------------------------
@@ -191,7 +221,7 @@ def detect_via_hotr_symlinks():
     """
     found = []
     for gun_type in sorted(GUN_DEFINITIONS, key=lambda t: GUN_DEFINITIONS[t]["type_num"]):
-        for link in sorted(glob.glob(f"/dev/hotr/{gun_type}-gun*")):
+        for link in sorted(glob.glob(f"{HOTR_SYMLINK_DIR}/{gun_type}-gun*")):
             if _resolve(link):
                 # The udev symlink points to ttyUSB; get the by-path equivalent.
                 found.append((gun_type, _get_by_path(os.path.realpath(link))))
@@ -203,7 +233,7 @@ def detect_via_by_id():
     Scan /dev/serial/by-id/ against all GUN_DEFINITIONS patterns.
     Returns list of (gun_type, by_path_path) sorted by type_num then name.
     """
-    by_id_dir = "/dev/serial/by-id"
+    by_id_dir = SERIAL_BY_ID_DIR
     if not os.path.isdir(by_id_dir):
         return []
 
@@ -250,12 +280,120 @@ def detect_guns():
     return result
 
 
+def detect_hid_guns():
+    """Return supported HID guns as (name, hidraw path, VID, PID).
+
+    HID configuration is intentionally not synthesized yet: HOTR's HID
+    blocks contain device-specific command settings which must be preserved
+    from a user-created profile.  Discovery is still useful for diagnostics
+    and for selecting those existing blocks.
+    """
+    found = []
+    for node in sorted(glob.glob(os.path.join(HIDRAW_DIR, "hidraw*"))):
+        name = os.path.basename(node)
+        uevent = os.path.join(HID_SYSFS_DIR, name, "device", "uevent")
+        values = {}
+        try:
+            with open(uevent) as source:
+                for line in source:
+                    if "=" in line:
+                        key, value = line.strip().split("=", 1)
+                        values[key] = value
+        except OSError:
+            continue
+        hid_id = values.get("HID_ID", "").split(":")
+        if len(hid_id) != 3:
+            continue
+        vid, pid = hid_id[1].lower().zfill(8)[-4:], hid_id[2].lower().zfill(8)[-4:]
+        gun_name = HID_DEFINITIONS.get((vid, pid))
+        if gun_name:
+            found.append((gun_name, node, vid, pid))
+    return found
+
+
+def detect_mx24_hubs():
+    """Find MX24 serial hubs without guessing their DIP-switch player IDs."""
+    found = []
+    if not os.path.isdir(SERIAL_BY_ID_DIR):
+        return found
+    for entry in sorted(os.listdir(SERIAL_BY_ID_DIR)):
+        if not MX24_RE.search(entry):
+            continue
+        path = os.path.join(SERIAL_BY_ID_DIR, entry)
+        if os.path.exists(path):
+            found.append(_get_by_path(path))
+    return found
+
+
+def detect_sinden_inputs():
+    """Report Batocera-created Sinden virtual inputs, if present."""
+    if not os.path.isdir(INPUT_BY_ID_DIR):
+        return []
+    return [os.path.join(INPUT_BY_ID_DIR, entry)
+            for entry in sorted(os.listdir(INPUT_BY_ID_DIR))
+            if "sinden" in entry.lower() and
+            os.path.exists(os.path.join(INPUT_BY_ID_DIR, entry))]
+
+
 # ---------------------------------------------------------------------------
 # Config writers
 # ---------------------------------------------------------------------------
 
-def write_lightguns_hor(guns):
-    lines = ["Light Gun Data File V3", str(len(guns))]
+def _read_existing_blocks():
+    """Return existing HOTR gun blocks that are not managed by this scanner."""
+    if not os.path.isfile(LIGHTGUNS_FILE):
+        return []
+    try:
+        with open(LIGHTGUNS_FILE) as config:
+            raw = config.read().splitlines()
+    except OSError:
+        return []
+
+    blocks = []
+    current = None
+    managed_names = tuple(d["name"] for d in GUN_DEFINITIONS.values())
+    for line in raw:
+        if line.startswith("Light Gun #"):
+            if current:
+                blocks.append(current)
+            current = [line]
+        elif current is not None:
+            if line == "END_OF_FILE":
+                blocks.append(current)
+                current = None
+            else:
+                current.append(line)
+    if current:
+        blocks.append(current)
+
+    preserved = []
+    for block in blocks:
+        name = block[2] if len(block) > 2 else ""
+        if not any(name == managed or name.startswith(managed + " ")
+                   for managed in managed_names):
+            preserved.append(block)
+    return preserved
+
+
+def _renumber_block(block, index):
+    """Renumber a preserved block without changing its HOTR settings."""
+    result = list(block)
+    if result:
+        result[0] = f"Light Gun #{index}"
+    if len(result) > 1 and result[1].isdigit():
+        result[1] = str(index)
+    try:
+        general_end = result.index("END_GENERAL_SETTINGS")
+        if general_end + 1 < len(result) and result[general_end + 1].isdigit():
+            result[general_end + 1] = str(index)
+    except ValueError:
+        pass
+    return result
+
+
+def write_lightguns_hor(guns, preserved_blocks=None):
+    preserved_blocks = preserved_blocks or []
+    lines = ["Light Gun Data File V3", str(len(guns) + len(preserved_blocks))]
     for i, (gun_type, device_path) in enumerate(guns):
         d = GUN_DEFINITIONS[gun_type]
         baud, data, parity, stop, flow = d["serial"]
@@ -274,6 +412,8 @@ def write_lightguns_hor(guns):
         ]
         for val in d.get("extra", []):
             lines.append(str(val))
+    for offset, block in enumerate(preserved_blocks, start=len(guns)):
+        lines.extend(_renumber_block(block, offset))
     lines.append("END_OF_FILE")
     with open(LIGHTGUNS_FILE, "w") as f:
         f.write("\n".join(lines) + "\n")
@@ -299,20 +439,32 @@ def main():
         print(f"hotr-autoconfig: {HOTR_DATA_DIR} not ready, skipping")
         sys.exit(0)
 
-    if not force and _config_has_guns():
+    if not force and _config_has_guns() and _config_paths_available():
         print("hotr-autoconfig: existing gun config found, skipping "
               "(use --force to rescan)")
         sys.exit(0)
 
+    if not force and _config_has_guns():
+        print("hotr-autoconfig: saved device path is missing, rescanning")
+
     guns = detect_guns()
+    hid_guns = detect_hid_guns()
+    mx24_hubs = detect_mx24_hubs()
+    sinden_inputs = detect_sinden_inputs()
+    preserved_blocks = _read_existing_blocks()
 
     if not guns:
         if force:
-            # Write empty config so HOTR starts clean for manual setup via UI.
-            print("hotr-autoconfig: no supported guns detected — "
-                  "writing empty config for manual setup via HOTR UI")
-            write_lightguns_hor([])
-            write_players_hor([])
+            # Never erase manually configured HID/MX24/Sinden entries just
+            # because udev is still settling or a device is temporarily
+            # disconnected during boot.  A later explicit setup/rescan can
+            # remove those entries through HOTR itself.
+            if _config_has_guns():
+                print("hotr-autoconfig: no serial guns detected — "
+                      "preserving existing manual configuration")
+            else:
+                print("hotr-autoconfig: no supported guns detected — "
+                      "leaving an empty/manual configuration")
         else:
             print("hotr-autoconfig: no supported guns detected, "
                   "leaving existing config")
@@ -322,9 +474,20 @@ def main():
     for i, (gun_type, path) in enumerate(guns):
         d = GUN_DEFINITIONS[gun_type]
         print(f"  Player {i + 1}: {d['name']} -> {path}")
+    for name, path, vid, pid in hid_guns:
+        print(f"  HID detected: {name} ({vid}:{pid}) -> {path}; "
+              "preserving HOTR HID configuration")
+    for path in mx24_hubs:
+        print(f"  MX24 hub detected: {path}; preserving DIP/player assignment")
+    for path in sinden_inputs:
+        print(f"  Sinden virtual input detected: {path}; "
+              "preserving TCP configuration")
 
-    write_lightguns_hor(guns)
-    write_players_hor(guns)
+    write_lightguns_hor(guns, preserved_blocks)
+    if not preserved_blocks:
+        write_players_hor(guns)
+    else:
+        print("hotr-autoconfig: preserved existing player assignments")
     print("hotr-autoconfig: config written successfully")
 
 

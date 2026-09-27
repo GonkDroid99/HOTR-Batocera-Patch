@@ -16,14 +16,31 @@ done
 need_exec "$ROOT/payload/emulators/duckstation/MameOutputSender"
 need_exec "$ROOT/payload/emulators/pcsx2/pcsx2-lightgun-qt"
 need_exec "$ROOT/payload/emulators/pcsx2/MameOutputSender"
-need_exec "$ROOT/payload/hotr/hook-of-the-reaper"
+HOTR=""
+for candidate in "$ROOT/payload/hotr/hook-of-the-reaper" "$ROOT/payload/hotr/Hook_of_the_Reaper-x86_64.AppImage"; do
+  if [ -x "$candidate" ]; then HOTR="$candidate"; break; fi
+done
+[ -n "$HOTR" ] || { echo "ERROR: HOTR AppImage is missing from payload/hotr." >&2; exit 2; }
 
 mkdir -p "$OUTDIR"
 rm -f "$OUTDIR/$NAME"
+command -v rsync >/dev/null || { echo "ERROR: rsync is required to stage the release package." >&2; exit 2; }
+STAGE="$(mktemp -d)"
+trap 'rm -rf "$STAGE"' EXIT
+mkdir -p "$STAGE/$(basename "$ROOT")"
+rsync -a "$ROOT/" "$STAGE/$(basename "$ROOT")/" \
+  --exclude '/.git/' \
+  --exclude '/.github/' \
+  --exclude '/buildroot/' \
+  --exclude '/dist/' \
+  --exclude '/.binary-staging/' \
+  --exclude '/binaries/' \
+  --exclude '/__pycache__/' \
+  --exclude '*.pyc' \
+  --exclude '/reference/bin/' \
+  --exclude '/scripts/publish-binaries-release.sh'
 (
-  cd "$(dirname "$ROOT")"
-  zip -qr "$OUTDIR/$NAME" "$(basename "$ROOT")" \
-    -x '*/dist/*' '*/.git/*' '*/.github/*' '*/__pycache__/*' '*.pyc' \
-       '*/reference/bin/*' '*/scripts/publish-binaries-release.sh'
+  cd "$STAGE"
+  zip -qr "$OUTDIR/$NAME" "$(basename "$ROOT")"
 )
 echo "$OUTDIR/$NAME"

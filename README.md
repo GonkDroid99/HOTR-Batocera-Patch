@@ -19,7 +19,7 @@ curl -fsSL https://raw.githubusercontent.com/GonkDroid99/HOTR-Batocera-Patch/mai
 
 Reboot after installation.
 
-## Install
+## Uninstall
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/GonkDroid99/HOTR-Batocera-Patch/main/uninstall.sh | bash
@@ -34,6 +34,13 @@ curl -fsSL https://raw.githubusercontent.com/GonkDroid99/HOTR-Batocera-Patch/mai
 ```
 
 Reboot after installation.
+
+## Development layout
+
+See [`docs/PROJECT_LAYOUT.md`](docs/PROJECT_LAYOUT.md) for the active install,
+runtime, testing, and Buildroot paths. The current project deliberately keeps
+the stock Batocera emulators untouched and installs separate HOTR emulator
+configurations.
 
 
 ## Installed layout

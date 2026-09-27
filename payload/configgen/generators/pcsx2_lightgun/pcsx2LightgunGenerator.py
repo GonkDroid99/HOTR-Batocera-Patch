@@ -57,8 +57,9 @@ class Pcsx2LightgunGenerator(Pcsx2Generator):
         config_path = _PCSX2_LIGHTGUN_CONFIG_DIR / "inis" / "PCSX2.ini"
         config_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Seed once from stock PCSX2. Do NOT overwrite this file every launch:
-        # HOTR-specific SDL/GunCon2 bindings and user changes must persist.
+        # Seed once from stock PCSX2 as an initial baseline. After that, the
+        # HOTR config remains independent; Batocera options for ps2-hotr are
+        # applied directly below instead of replacing this file from stock.
         if not config_path.exists() and parent_config.exists():
             content = parent_config.read_bytes().decode("latin-1")
             content = content.replace("/usr/pcsx2/bin", str(_PCSX2_LIGHTGUN_BIN_DIR))
@@ -67,6 +68,36 @@ class Pcsx2LightgunGenerator(Pcsx2Generator):
         pcsx2_config = CaseSensitiveConfigParser(interpolation=None)
         if config_path.exists():
             pcsx2_config.read(config_path, encoding="latin-1")
+
+        # super().generate() applies the ps2-hotr options to the stock
+        # generator's file. Copy only those option keys into the isolated HOTR
+        # file; never replace the whole file, since the HOTR build has its own
+        # UI, input and emulator settings.
+        if parent_config.exists():
+            stock_config = CaseSensitiveConfigParser(interpolation=None)
+            stock_config.read(parent_config, encoding="latin-1")
+            managed_options = {
+                "EmuCore": (
+                    "EnableCheats", "EnableWideScreenPatches",
+                    "EnableNoInterlacingPatches", "TVShader",
+                ),
+                "EmuCore/GS": (
+                    "AspectRatio", "VsyncEnable", "upscale_multiplier",
+                    "fxaa", "FMVAspectRatioSwitch", "mipmap_hw",
+                    "TriFilter", "MaxAnisotropy", "dithering_ps2",
+                    "texture_preloading", "deinterlace_mode", "pcrtc_antiblur",
+                    "IntegerScaling", "accurate_blending_unit", "filter",
+                    "linear_present_mode", "LoadTextureReplacements",
+                ),
+            }
+            for section, keys in managed_options.items():
+                if not stock_config.has_section(section):
+                    continue
+                if not pcsx2_config.has_section(section):
+                    pcsx2_config.add_section(section)
+                for key in keys:
+                    if stock_config.has_option(section, key):
+                        pcsx2_config.set(section, key, stock_config.get(section, key))
 
         if not pcsx2_config.has_section("Folders"):
             pcsx2_config.add_section("Folders")
