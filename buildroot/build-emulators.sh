@@ -71,6 +71,15 @@ PCSX2ROOT="$TARGET/usr/pcsx2-lightgun/bin"
 install -m 0755 "$PCSX2ROOT/pcsx2-lightgun-qt" "$DIST/pcsx2/pcsx2-lightgun-qt"
 [ -d "$PCSX2ROOT/resources" ] && cp -a "$PCSX2ROOT/resources" "$DIST/pcsx2/"
 [ -d "$PCSX2ROOT/translations" ] && cp -a "$PCSX2ROOT/translations" "$DIST/pcsx2/"
+
+# The PCSX2 recipe installs the current official patch archive into the
+# Batocera datainit tree. Promote that exact artifact into the installer
+# payload so a bundled install can seed /userdata/bios/ps2/patches.zip.
+PATCHES="$TARGET/usr/share/batocera/datainit/bios/ps2/patches.zip"
+[ -s "$PATCHES" ] || { echo "ERROR: PCSX2 patches archive missing: $PATCHES" >&2; exit 3; }
+unzip -t "$PATCHES" >/dev/null || { echo "ERROR: Invalid PCSX2 patches archive: $PATCHES" >&2; exit 3; }
+install -m 0644 "$PATCHES" "$ROOT/payload/bios/ps2/patches.zip"
+
 # PCSX2 LightGun links against rapidyaml 0.12.1. Keep that library private to
 # the HOTR build instead of installing/overriding it globally on Batocera.
 mkdir -p "$DIST/pcsx2/lib"

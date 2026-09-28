@@ -26,13 +26,6 @@ echo "$VER" | grep -Eq '(^|[^0-9])43([.]|[^0-9]|$)' || warn "Designed/tested for
 mkdir -p "$HOTR"/{bin,emulators/duckstation,emulators/pcsx2,scripts,software/hook-of-the-reaper,backups,install,tools} \
          "$HOTR_DATA"/{data,defaultLG} /userdata/system/services /userdata/system/configs/emulationstation /userdata/roms/ports
 
-# Seed the PCSX2 patch archive for the HOTR build without overwriting a
-# user-maintained archive already present in the normal Batocera BIOS path.
-if [ -f "$BASE/payload/bios/ps2/patches.zip" ]; then
-  mkdir -p /userdata/bios/ps2
-  [ -f /userdata/bios/ps2/patches.zip ] || cp -a "$BASE/payload/bios/ps2/patches.zip" /userdata/bios/ps2/patches.zip
-fi
-
 fetch_latest_asset(){
   local repo="$1" regex="$2" out="$3"
   python3 - "$repo" "$regex" "$out" <<'PY'
@@ -49,6 +42,27 @@ for asset in data.get("assets",[]):
 raise SystemExit("No release asset matched: "+rx)
 PY
 }
+
+install_pcsx2_patches(){
+  local tmp; tmp="$(mktemp -d)"
+  mkdir -p /userdata/bios/ps2
+
+  # Prefer the current official release, but retain the bundled archive as an
+  # offline fallback so installation still works without network access.
+  if fetch_latest_asset "PCSX2/pcsx2_patches" '^patches\.zip$' "$tmp/patches.zip" \
+      && unzip -t "$tmp/patches.zip" >/dev/null 2>&1; then
+    install -m 0644 "$tmp/patches.zip" /userdata/bios/ps2/patches.zip
+    msg "Installed current PCSX2 patches from the official release."
+  elif [ -f "$BASE/payload/bios/ps2/patches.zip" ]; then
+    install -m 0644 "$BASE/payload/bios/ps2/patches.zip" /userdata/bios/ps2/patches.zip
+    warn "Could not download current PCSX2 patches; using bundled archive."
+  else
+    warn "PCSX2 patches archive unavailable online and no bundled fallback exists."
+  fi
+  rm -rf "$tmp"
+}
+
+install_pcsx2_patches
 
 extract_any(){
   local file="$1" dest="$2"; mkdir -p "$dest"
@@ -157,11 +171,13 @@ cp -a "$BASE/scripts/generate-es-features-hotr.py" "$HOTR/bin/generate-es-featur
 chmod +x "$HOTR/bin/generate-es-features-hotr.py"
 "$HOTR/bin/generate-es-features-hotr.py" "$HOTR/install/pcsx2_legacy_features.xml"
 cp -a "$BASE/installer.conf" "$HOTR/install/installer.conf"
-cp -a "$BASE/uninstall.sh" "$BASE/update.sh" "$BASE/check-install.sh" "$HOTR/tools/"
+cp -a "$BASE/uninstall.sh" "$BASE/update.sh" "$BASE/check-install.sh" "$BASE/scripts/hotr-debug-report.sh" "$HOTR/tools/"
 chmod +x "$HOTR/tools/"*.sh "$HOTR/bin/"* "$HOTR/scripts/"*.sh /userdata/system/services/hotr
 
-cp -a "$BASE/scripts/ports/HookOfTheReaper.sh" "$BASE/scripts/ports/HOTR-Rescan-Guns.sh" /userdata/roms/ports/
-chmod +x /userdata/roms/ports/HookOfTheReaper.sh /userdata/roms/ports/HOTR-Rescan-Guns.sh
+cp -a "$BASE/scripts/ports/HookOfTheReaper.sh" "$BASE/scripts/ports/HOTR-Rescan-Guns.sh" \
+  "$BASE/scripts/ports/HOTR-Debug-Start.sh" "$BASE/scripts/ports/HOTR-Debug-Finish.sh" /userdata/roms/ports/
+chmod +x /userdata/roms/ports/HookOfTheReaper.sh /userdata/roms/ports/HOTR-Rescan-Guns.sh \
+  /userdata/roms/ports/HOTR-Debug-Start.sh /userdata/roms/ports/HOTR-Debug-Finish.sh
 rm -f /userdata/roms/ports/HOTR-Setup.sh
 
 CONF=/userdata/system/batocera.conf; touch "$CONF"

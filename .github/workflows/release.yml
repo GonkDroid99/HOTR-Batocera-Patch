@@ -55,6 +55,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          mkdir -p payload/bios/ps2
+          curl -fsSL --retry 3 \
+            https://github.com/PCSX2/pcsx2_patches/releases/download/latest/patches.zip \
+            -o payload/bios/ps2/patches.zip
+          unzip -t payload/bios/ps2/patches.zip >/dev/null
+
           rm -rf payload/emulators/duckstation
           mkdir -p payload/emulators/duckstation payload/emulators/pcsx2 payload/hotr
 

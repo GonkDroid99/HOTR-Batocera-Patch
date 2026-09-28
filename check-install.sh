@@ -11,10 +11,12 @@ check /userdata/system/configs/emulationstation/es_features_hotr.cfg
 check_exec /userdata/system/services/hotr
 check_exec /userdata/system/hotr/software/hook-of-the-reaper/hook-of-the-reaper
 check_exec /userdata/system/hotr/bin/hotr-configgen-launch
+check_exec /userdata/system/hotr/tools/hotr-debug-report.sh
 check_exec /userdata/system/hotr/emulators/duckstation/MameOutputSender
 check_exec /userdata/system/hotr/emulators/pcsx2/MameOutputSender
 check_exec /userdata/system/hotr/emulators/duckstation/duckstation-lightgun-qt
 check_exec /userdata/system/hotr/emulators/pcsx2/pcsx2-lightgun-qt
+check /userdata/bios/ps2/patches.zip
 check "$GENROOT/duckstation_lightgun/duckstationLightgunGenerator.py"
 check "$GENROOT/pcsx2_lightgun/pcsx2LightgunGenerator.py"
 check "$GENROOT/lightgun_rs3.py"

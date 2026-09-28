@@ -28,6 +28,12 @@ if command -v batocera-launch >/dev/null 2>&1; then
   LAUNCHER=(batocera-launch)
 fi
 
+mkdir -p /userdata/system/logs
+printf '\n[%s] HOTR game launch:' "$(date '+%Y-%m-%dT%H:%M:%S%z')" >>/userdata/system/logs/hotr-game-launch.log
+printf ' %q' "${LAUNCHER[@]}" "$@" -system "$SYSTEM" -emulator "$EMULATOR" -core "$CORE" \
+  >>/userdata/system/logs/hotr-game-launch.log
+printf '\n' >>/userdata/system/logs/hotr-game-launch.log
+
 exec "${LAUNCHER[@]}" \
   "$@" \
   -system "$SYSTEM" \

@@ -76,7 +76,17 @@ start_hotr() {
   unset XDG_RUNTIME_DIR
 
   cd "$APPDIR" || return 1
-  nohup "$DAEMON" --no-ui >>"$LOGFILE" 2>&1 &
+  # Batocera's v44 launcher waits for inherited pipes to close. start-stop-
+  # daemon --background closes all inherited descriptors, including extra
+  # descriptors beyond stdin/stdout/stderr that Batocera keeps open.
+  if command -v start-stop-daemon >/dev/null 2>&1; then
+    start-stop-daemon --start --background --exec "$DAEMON" --startas "$DAEMON" \
+      --output "$LOGFILE" -- --no-ui
+  elif command -v setsid >/dev/null 2>&1; then
+    setsid -f "$DAEMON" --no-ui </dev/null >>"$LOGFILE" 2>&1
+  else
+    nohup "$DAEMON" --no-ui </dev/null >>"$LOGFILE" 2>&1 &
+  fi
 
   [ -x "$ROOT/scripts/custom-boot.sh" ] && "$ROOT/scripts/custom-boot.sh" >>"$LOGFILE" 2>&1 || true
 }
