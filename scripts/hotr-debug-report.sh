@@ -8,8 +8,6 @@ STATE="$LOGROOT/current"
 SERVICE=/userdata/system/services/hotr
 REPORT="$STATE/report.txt"
 WATCHPID="$STATE/watcher.pid"
-STRACEWATCHPID="$STATE/strace-watcher.pid"
-STRACEPIDS="$STATE/strace.pids"
 
 mkdir -p "$LOGROOT"
 
@@ -24,13 +22,47 @@ proc_cmdline(){
   tr '\0' ' ' <"/proc/$1/cmdline" 2>/dev/null || true
 }
 
+autoconfig_summary(){
+  local config=/userdata/system/hook-of-the-reaper/data/lightguns.hor
+  local service_log=/userdata/system/logs/hook-of-the-reaper.log
+  local raw_path path count=0
+
+  echo 'Recent autoconfiguration messages:'
+  grep -E 'hotr-autoconfig:|HOTR autoconfiguration failed' "$service_log" 2>/dev/null | tail -n 20 || echo '  none found'
+  echo
+  if [ -f "$config" ]; then
+    printf 'Configuration timestamp: '
+    stat -c '%y' "$config" 2>/dev/null || stat "$config" 2>/dev/null || true
+    echo 'Saved serial paths:'
+    while IFS= read -r raw_path; do
+      path="$raw_path"
+      case "$path" in
+        /dev/ttyUSB*|/dev/ttyACM*) ;;
+        ttyUSB*|ttyACM*) path="/dev/$path" ;;
+        *) continue ;;
+      esac
+      count=$((count + 1))
+      if [ -e "$path" ]; then
+        echo "  PRESENT  $path"
+      else
+        echo "  MISSING  $path"
+      fi
+    done < <(grep -E '^(/dev/)?tty(USB|ACM)' "$config" 2>/dev/null || true)
+    echo "Paths written: $count"
+  else
+    echo "Configuration file missing: $config"
+  fi
+}
+
 hotr_pids(){
   local p pid line
   for p in /proc/[0-9]*; do
     pid="${p##*/}"
     line="$(proc_cmdline "$pid")"
     case "$line" in
-      *HookOfTheReaper*|*/hook-of-the-reaper*) printf '%s %s\n' "$pid" "$line" ;;
+      /tmp/.mount_hook-*/usr/bin/HookOfTheReaper\ --no-ui*|\
+      "$ROOT/software/hook-of-the-reaper"\ --no-ui*)
+        printf '%s %s\n' "$pid" "$line" ;;
     esac
   done
 }
@@ -50,7 +82,17 @@ collect_report(){
     cmd "$SERVICE" status
     cmd ps -ef
     section 'HOTR service log'
-    cmd tail -n 500 /userdata/system/logs/hook-of-the-reaper.log
+    cmd tail -n 120 /userdata/system/logs/hook-of-the-reaper.log
+    section 'Sinden broker log'
+    cmd tail -n 120 /userdata/system/logs/hotr-sinden-broker.log
+    section 'Sinden broker workers'
+    cmd ls -la /var/run/hotr-sinden
+    cmd cat /userdata/system/hotr/sinden-player-map
+    cmd sed -n '1,80p' /usr/bin/virtual-sindenlightgun-add
+    section 'Autoconfiguration summary'
+    autoconfig_summary
+    section 'Historical HOTR errors'
+    cmd sh -c "grep -Ein 'serial port error|failed to open|permission denied|resource busy|already in use|no such file|cannot open|autoconfiguration failed' /userdata/system/logs/hook-of-the-reaper.log 2>/dev/null | tail -n 80 || true"
     section 'Game launch log'
     cmd tail -n 300 /userdata/system/logs/hotr-game-launch.log
 
@@ -77,16 +119,55 @@ collect_report(){
 
     section 'Live samples'
     cmd cat "$STATE/process-samples.log"
-    section 'Serial syscall trace'
-    cmd cat "$STATE/strace-attach.log"
-    for trace in "$STATE"/strace.*; do
-      [ -f "$trace" ] || continue
-      cmd cat "$trace"
+    section 'Open serial handles'
+    for pid in $(hotr_pids | awk '{print $1}'); do
+      printf '\nHOTR PID %s (%s)\n' "$pid" "$(proc_cmdline "$pid")"
+      cmd ls -l "/proc/$pid/fd"
+      cmd sh -c "ls -l /proc/$pid/fd 2>/dev/null | grep -E 'ttyUSB|ttyACM|serial' || true"
     done
+  } >>"$REPORT" 2>&1
+
+  {
+    section 'Quick summary'
+    if ! ls /dev/ttyUSB* /dev/ttyACM* >/dev/null 2>&1; then
+      echo 'POSSIBLE ISSUE: No ttyUSB or ttyACM serial device exists.'
+    elif ! find -L /dev/hotr /dev/serial/by-id /dev/serial/by-path -maxdepth 2 -type l 2>/dev/null | grep -q .; then
+      echo 'WARNING: A serial node exists but no stable serial link was found.'
+    fi
+    if ! grep -q '3AGAME\|Retro Shooter' /proc/bus/input/devices 2>/dev/null; then
+      echo 'POSSIBLE ISSUE: No RS3/Reaper HID input device was detected.'
+    fi
+    if ! hotr_pids | grep -q .; then
+      echo 'POSSIBLE ISSUE: HOTR process is not currently running.'
+    fi
+    if grep -Eiq 'permission denied|access denied|eacces' \
+        /userdata/system/logs/hook-of-the-reaper.log \
+        /userdata/system/logs/hotr-game-launch.log \
+        /userdata/system/logs/hotr-sinden-broker.log 2>/dev/null; then
+      echo 'POSSIBLE ISSUE: A permission/access-denied error was found.'
+    fi
+    if grep -Eiq 'no such file|enoent|cannot open|failed to open|serial port error|error opening' \
+        /userdata/system/logs/hook-of-the-reaper.log \
+        /userdata/system/logs/hotr-game-launch.log \
+        /userdata/system/logs/hotr-sinden-broker.log 2>/dev/null; then
+      echo 'POSSIBLE ISSUE: A missing or unavailable device/configuration path was found.'
+    fi
+    if grep -Eiq 'resource busy|already in use|ebusy' \
+        /userdata/system/logs/hook-of-the-reaper.log \
+        /userdata/system/logs/hotr-game-launch.log \
+        /userdata/system/logs/hotr-sinden-broker.log 2>/dev/null; then
+      echo 'POSSIBLE ISSUE: A serial device may already be in use by another process.'
+    fi
+    if ! grep -q 'POSSIBLE ISSUE' "$REPORT"; then
+      echo 'No obvious HOTR serial, HID, process, or access errors were detected.'
+    fi
   } >>"$REPORT" 2>&1
 }
 
 start_capture(){
+  # Keep only the current capture and its eventual upload result. Older
+  # reports are intentionally removed so users do not submit stale logs.
+  rm -f "$LOGROOT"/hotr-debug-*.txt
   rm -rf "$STATE"
   mkdir -p "$STATE"
   printf '%s\n' "$(now)" >"$STATE/started-at"
@@ -106,29 +187,6 @@ start_capture(){
   ) </dev/null >/dev/null 2>&1 &
   echo $! >"$WATCHPID"
 
-  # Attach to HOTR when possible so the report contains the exact open(2)
-  # path and kernel errno. This is useful when the UI test works but a game
-  # profile tries to open a different or stale TTY.
-  if command -v strace >/dev/null 2>&1; then
-    : >"$STRACEPIDS"
-    (
-      while :; do
-        for pid in $(hotr_pids | awk '{print $1}'); do
-          grep -qx "$pid" "$STATE/strace-attached" 2>/dev/null && continue
-          printf '%s\n' "$pid" >>"$STATE/strace-attached"
-          strace -ff -tt -s 128 \
-            -e trace=open,openat,close,ioctl \
-            -p "$pid" -o "$STATE/strace.$pid" \
-            2>>"$STATE/strace-attach.log" &
-          echo $! >>"$STRACEPIDS"
-        done
-        sleep 1
-      done
-    ) </dev/null >/dev/null 2>&1 &
-    echo $! >"$STRACEWATCHPID"
-  else
-    echo 'strace unavailable; process/device sampling only.' >"$STATE/strace-attach.log"
-  fi
   echo "HOTR debug capture started. Launch the failing game now."
   echo "When finished, run: $0 finish"
   echo "Capture directory: $STATE"
@@ -139,21 +197,18 @@ stop_watcher(){
     kill "$(cat "$WATCHPID")" 2>/dev/null || true
     rm -f "$WATCHPID"
   fi
-  if [ -r "$STRACEWATCHPID" ]; then
-    kill "$(cat "$STRACEWATCHPID")" 2>/dev/null || true
-    rm -f "$STRACEWATCHPID"
-  fi
-  if [ -r "$STRACEPIDS" ]; then
-    while read -r pid; do kill "$pid" 2>/dev/null || true; done <"$STRACEPIDS"
-  fi
 }
 
 finish_capture(){
   [ -d "$STATE" ] || { echo "No active HOTR debug capture." >&2; exit 2; }
   stop_watcher
   collect_report
-  cp -f "$REPORT" "$LOGROOT/hotr-debug-$(date +%Y%m%d-%H%M%S).txt"
+  SAVED_REPORT="$LOGROOT/hotr-debug-$(date +%Y%m%d-%H%M%S).txt"
+  cp -f "$REPORT" "$SAVED_REPORT"
   echo "HOTR debug report created: $REPORT"
+  echo
+  sed -n '/===== Quick summary =====/,$p' "$REPORT"
+  echo
   upload_report
 }
 
@@ -164,14 +219,19 @@ upload_report(){
     return 1
   fi
   local endpoint url
-  endpoint="${HOTR_PASTE_URL:-https://paste.rs}"
-  url="$(curl -fsS --max-time 30 --data-binary "@$REPORT" "$endpoint" 2>/dev/null || true)"
-  if [ -n "$url" ]; then
-    printf '%s\n' "$url" | tee "$STATE/paste-url"
-  else
-    echo "Upload failed; report remains at $REPORT" >&2
-    return 1
+  mkdir -p "$STATE"
+  endpoint="${HOTR_PASTE_URL:-https://paste.rs/}"
+  case "$endpoint" in
+    */) ;;
+    *) endpoint="$endpoint/" ;;
+  esac
+  if url="$(curl --fail --silent --show-error --max-time 30 \
+      --data-binary "@$REPORT" "$endpoint")" && [ -n "$url" ]; then
+    printf 'Paste URL: %s\n' "$url" | tee "$STATE/paste-url"
+    return 0
   fi
+  echo "Paste upload failed; report remains at $REPORT" >&2
+  return 1
 }
 
 case "${1:-}" in

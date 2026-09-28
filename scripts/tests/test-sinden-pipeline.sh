@@ -3,7 +3,12 @@
 # Hardware camera tracking cannot be tested without a gun, but the boot
 # scripts, subsystem names, and TCP endpoint used by the simulated service can.
 set -euo pipefail
-BASE="$(cd "$(dirname "$0")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ -f "$SCRIPT_DIR/../../buildroot/src/batocera.linux-43/package/batocera/controllers/guns/sinden-guns/virtual-sindenlightgun-add" ]; then
+  BASE="$(cd "$SCRIPT_DIR/../.." && pwd)"
+else
+  BASE="$(cd "$SCRIPT_DIR/.." && pwd)"
+fi
 ADD="$BASE/buildroot/src/batocera.linux-43/package/batocera/controllers/guns/sinden-guns/virtual-sindenlightgun-add"
 HELPER="$BASE/buildroot/src/batocera.linux-43/package/batocera/utils/evsieve/evsieve-helper"
 PATCH="$BASE/scripts/patch-batocera-sinden.sh"

@@ -1,0 +1,75 @@
+#!/bin/bash
+# Start/locate the HOTR Sinden serial worker for one Batocera Sinden gun.
+# Called by virtual-sindenlightgun-add after Batocera has found the physical
+# ttyACM device. The worker owns the physical port; Mono receives its PTY.
+set -u
+
+ACTION="${1:-}"
+HASH="${2:-}"
+PHYSICAL="${3:-}"
+ROOT=/userdata/system/hotr
+BROKER="$ROOT/bin/hotr-sinden-broker.py"
+RUN=/var/run/hotr-sinden
+CONTROL="$RUN/broker.sock"
+MAP="$ROOT/sinden-player-map"
+LOG=/userdata/system/logs/hotr-sinden-broker.log
+
+die() { echo "hotr-sinden-worker-launch: $*" >&2; exit 1; }
+[ "$ACTION" = start ] || die "usage: $0 start parent-hash /dev/ttyACM0"
+[ -n "$HASH" ] || die "parent hash is missing"
+[ -c "$PHYSICAL" ] || die "serial device is unavailable: $PHYSICAL"
+[ -x "$BROKER" ] || die "broker is not installed: $BROKER"
+
+mkdir -p "$RUN" "$ROOT"
+PTYFILE="$RUN/p${HASH}.pty"
+PIDFILE="$RUN/p${HASH}.worker.pid"
+LOCK="$RUN/player-map.lock"
+
+if [ -r "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE" 2>/dev/null)" 2>/dev/null && [ -r "$PTYFILE" ]; then
+    pty="$(head -n 1 "$PTYFILE" 2>/dev/null || true)"
+    [ -c "$pty" ] && { printf '%s\n' "$pty"; exit 0; }
+fi
+
+# Assign a stable HOTR player number to the physical Sinden identity. The
+# mapping survives reboots/updates, while the actual tty and PTY are rebuilt.
+while ! mkdir "$LOCK" 2>/dev/null; do sleep 0.05; done
+player="$(awk -F= -v h="$HASH" '$1 == h {print $2; exit}' "$MAP" 2>/dev/null || true)"
+if [ "$player" != 1 ] && [ "$player" != 2 ]; then
+    for candidate in 1 2; do
+        if awk -F= -v p="$candidate" '$2 == p {found=1} END {exit found}' "$MAP" 2>/dev/null; then
+            player="$candidate"
+            printf '%s=%s\n' "$HASH" "$player" >>"$MAP"
+            break
+        fi
+    done
+fi
+rmdir "$LOCK" 2>/dev/null || true
+[ "$player" = 1 ] || [ "$player" = 2 ] || die "more than two Sinden guns are configured"
+
+rm -f "$PTYFILE"
+if [ -r "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE" 2>/dev/null)" 2>/dev/null; then
+    kill -TERM "$(cat "$PIDFILE" 2>/dev/null)" 2>/dev/null || true
+    sleep 0.1
+fi
+
+python3 "$BROKER" --worker --player "$player" --device "$player=$PHYSICAL" \
+    --control-socket "$CONTROL" --pty-file "$PTYFILE" --log "$LOG" \
+    </dev/null >/dev/null 2>&1 &
+worker_pid=$!
+printf '%s\n' "$worker_pid" >"$PIDFILE"
+
+for _ in $(seq 1 80); do
+    if [ -r "$PTYFILE" ]; then
+        pty="$(head -n 1 "$PTYFILE" 2>/dev/null || true)"
+        if [ -c "$pty" ]; then
+            printf '%s\n' "$pty"
+            exit 0
+        fi
+    fi
+    if ! kill -0 "$worker_pid" 2>/dev/null; then break; fi
+    sleep 0.1
+done
+
+kill -TERM "$worker_pid" 2>/dev/null || true
+rm -f "$PIDFILE" "$PTYFILE"
+die "worker did not create a PTY for $PHYSICAL"

@@ -5,6 +5,7 @@ BASE="$(cd "$(dirname "$0")" && pwd)"
 MODE="${1:---auto}"
 HOTR=/userdata/system/hotr
 HOTR_DATA=/userdata/system/hook-of-the-reaper
+SINDEN_ENABLE_FILE="$HOTR/sinden-tcp.enabled"
 LOG=/userdata/system/logs/hotr-install.log
 GENROOT="$(printf '%s\n' /usr/lib/python*/site-packages/configgen/generators | sort -V | while read -r candidate; do [ -d "$candidate" ] && printf '%s\n' "$candidate"; done | tail -n1)"
 
@@ -64,6 +65,37 @@ install_pcsx2_patches(){
 
 install_pcsx2_patches
 
+configure_sinden_tcp() {
+  local answer=""
+  case "${HOTR_SINDEN_TCP:-}" in
+    1|yes|YES|true|TRUE|on|ON) answer="y" ;;
+    0|no|NO|false|FALSE|off|OFF) answer="n" ;;
+    *)
+      if [ -t 0 ] && [ -t 1 ]; then
+        printf '[HOTR] Enable Sinden HOTR recoil broker? [y/N] '
+        IFS= read -r answer || answer=""
+      else
+        # Release installs are often piped from curl and have no tty. Do not
+        # silently turn off a previously selected optional component during an
+        # update; a first non-interactive install remains disabled.
+        [ -f "$SINDEN_ENABLE_FILE" ] && answer="y" || answer="n"
+      fi
+      ;;
+  esac
+  case "$answer" in
+    y|Y|yes|YES)
+      touch "$SINDEN_ENABLE_FILE"
+      msg "Sinden HOTR recoil broker enabled."
+      ;;
+    *)
+      rm -f "$SINDEN_ENABLE_FILE"
+      msg "Sinden HOTR recoil broker disabled (can be enabled later with HOTR_SINDEN_TCP=1)."
+      ;;
+  esac
+}
+
+configure_sinden_tcp
+
 extract_any(){
   local file="$1" dest="$2"; mkdir -p "$dest"
   if unzip -t "$file" >/dev/null 2>&1; then unzip -q "$file" -d "$dest"; return; fi
@@ -106,6 +138,16 @@ install_pcsx2_from_tree(){
   msg "PCSX2 HOTR native Batocera build installed."
 }
 
+install_pcsx2_patch_runtime(){
+  local archive=/userdata/bios/ps2/patches.zip
+  [ -s "$archive" ] || return 0
+  # Keep this beside the emulator as well as in /userdata/bios/ps2. Older
+  # HOTR PCSX2 binaries look in EmuFolders::Resources; newer patched builds
+  # look in EmuFolders::Bios.
+  mkdir -p "$HOTR/emulators/pcsx2/resources"
+  install -m 0644 "$archive" "$HOTR/emulators/pcsx2/resources/patches.zip"
+}
+
 install_bundled_emulators(){
   install_duck_from_tree "$BASE/payload/emulators/duckstation" || true
   install_pcsx2_from_tree "$BASE/payload/emulators/pcsx2" || true
@@ -132,6 +174,8 @@ case "$MODE" in
   --infrastructure-only) : ;;
   *) die "Usage: $0 [--auto|--bundled|--github-emulators|--infrastructure-only]" ;;
 esac
+
+install_pcsx2_patch_runtime
 
  # HOTR AppImage + persistent data. The payload intentionally has no nested
  # data/data directory. Accept both the release asset name and the normalized
@@ -162,6 +206,8 @@ ln -s "$HOTR_DATA/defaultLG" "$HOTR/software/hook-of-the-reaper/defaultLG"
 
 # Userdata scripts/config.
 cp -a "$BASE/payload/system/hotr-autoconfig.py" "$HOTR/bin/hotr-autoconfig.py"
+cp -a "$BASE/payload/system/hotr-sinden-broker.py" "$HOTR/bin/hotr-sinden-broker.py"
+cp -a "$BASE/payload/system/hotr-sinden-worker-launch" "$HOTR/bin/hotr-sinden-worker-launch"
 cp -a "$BASE/scripts/hotr-configgen-launch" "$BASE/scripts/add-emulator-config.sh" "$HOTR/bin/"
 cp -a "$BASE/scripts/custom-boot.sh" "$BASE/scripts/custom-stop.sh" "$HOTR/scripts/"
 cp -a "$BASE/scripts/hotr-service" /userdata/system/services/hotr
@@ -171,8 +217,22 @@ cp -a "$BASE/scripts/generate-es-features-hotr.py" "$HOTR/bin/generate-es-featur
 chmod +x "$HOTR/bin/generate-es-features-hotr.py"
 "$HOTR/bin/generate-es-features-hotr.py" "$HOTR/install/pcsx2_legacy_features.xml"
 cp -a "$BASE/installer.conf" "$HOTR/install/installer.conf"
-cp -a "$BASE/uninstall.sh" "$BASE/update.sh" "$BASE/check-install.sh" "$BASE/scripts/hotr-debug-report.sh" "$HOTR/tools/"
-chmod +x "$HOTR/tools/"*.sh "$HOTR/bin/"* "$HOTR/scripts/"*.sh /userdata/system/services/hotr
+cp -a "$BASE/uninstall.sh" "$BASE/update.sh" "$BASE/check-install.sh" \
+  "$BASE/scripts/hotr-debug-report.sh" \
+  "$BASE/scripts/tests/hotr-sinden-full-selftest.sh" \
+  "$BASE/scripts/tests/hotr-sinden-native-helper-selftest.py" \
+  "$BASE/scripts/patch-batocera-sinden-hotr.sh" "$HOTR/tools/"
+chmod +x "$HOTR/tools/"*.sh "$HOTR/tools/"*.py "$HOTR/bin/"* "$HOTR/scripts/"*.sh /userdata/system/services/hotr
+
+# This changes only the stock Sinden helper's SerialPortWrite value so Mono
+# uses the worker PTY. The physical tty remains owned by the worker. It is
+# independent of scripts/patch-batocera-sinden.sh (the optional 43 detection
+# workaround).
+if [ -f "$SINDEN_ENABLE_FILE" ]; then
+  "$HOTR/tools/patch-batocera-sinden-hotr.sh" apply
+else
+  "$HOTR/tools/patch-batocera-sinden-hotr.sh" remove
+fi
 
 cp -a "$BASE/scripts/ports/HookOfTheReaper.sh" "$BASE/scripts/ports/HOTR-Rescan-Guns.sh" \
   "$BASE/scripts/ports/HOTR-Debug-Start.sh" "$BASE/scripts/ports/HOTR-Debug-Finish.sh" /userdata/roms/ports/

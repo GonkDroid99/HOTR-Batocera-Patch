@@ -5,10 +5,23 @@ ROOT=/userdata/system/hotr
 APPDIR="$ROOT/software/hook-of-the-reaper"
 DAEMON="$APPDIR/hook-of-the-reaper"
 AUTOCONFIG="$ROOT/bin/hotr-autoconfig.py"
+SINDEN_BROKER="$ROOT/bin/hotr-sinden-broker.py"
 LOGFILE=/userdata/system/logs/hook-of-the-reaper.log
+SINDEN_LOG=/userdata/system/logs/hotr-sinden-broker.log
+SINDEN_PID=/var/run/hotr-sinden-broker.pid
+SINDEN_RUN=/var/run/hotr-sinden
+SINDEN_CONTROL="$SINDEN_RUN/broker.sock"
+SINDEN_ENABLE_FILE="$ROOT/sinden-tcp.enabled"
 DATADIR=/userdata/system/hook-of-the-reaper/data
+MAX_LOG_BYTES=1048576
 
 mkdir -p /userdata/system/logs
+
+rotate_log() {
+  [ -f "$LOGFILE" ] || return 0
+  [ "$(wc -c <"$LOGFILE" 2>/dev/null || echo 0)" -lt "$MAX_LOG_BYTES" ] && return 0
+  mv -f "$LOGFILE" "$LOGFILE.old" 2>/dev/null || true
+}
 
 proc_cmdline() {
   [ -r "/proc/$1/cmdline" ] || return 0
@@ -49,31 +62,100 @@ cleanup_stale_qipc() {
         /tmp/qipc_systemsem_HookOfTheReaper* 2>/dev/null || true
 }
 
+start_sinden_broker() {
+  [ -f "$SINDEN_ENABLE_FILE" ] || return 0
+  [ -x "$SINDEN_BROKER" ] || return 0
+  if [ -r "$SINDEN_PID" ] && kill -0 "$(cat "$SINDEN_PID" 2>/dev/null)" 2>/dev/null; then
+    return 0
+  fi
+  mkdir -p "$SINDEN_RUN"
+  rm -f "$SINDEN_PID"
+  # 13000 is HOTR's documented default. Configured Sinden profiles may add a
+  # second port; the broker reads those from lightguns.hor as well.
+  python3 "$SINDEN_BROKER" --config "$DATADIR/lightguns.hor" --port 13000 \
+    --control-socket "$SINDEN_CONTROL" --log "$SINDEN_LOG" \
+    </dev/null >/dev/null 2>&1 &
+  echo $! >"$SINDEN_PID"
+  sleep 1
+  if ! kill -0 "$(cat "$SINDEN_PID" 2>/dev/null)" 2>/dev/null; then
+    rm -f "$SINDEN_PID"
+  fi
+}
+
+stop_sinden_broker() {
+  local pid worker_pid pidfile
+  if [ -r "$SINDEN_PID" ]; then
+    pid="$(cat "$SINDEN_PID" 2>/dev/null || true)"
+    [ -n "$pid" ] && kill -TERM "$pid" 2>/dev/null || true
+  fi
+  rm -f "$SINDEN_PID"
+  for pidfile in "$SINDEN_RUN"/*.worker.pid; do
+    [ -r "$pidfile" ] || continue
+    worker_pid="$(cat "$pidfile" 2>/dev/null || true)"
+    [ -n "$worker_pid" ] && kill -TERM "$worker_pid" 2>/dev/null || true
+    rm -f "$pidfile"
+  done
+  rm -f "$SINDEN_CONTROL" "$SINDEN_RUN"/*.pty
+}
+
 start_hotr() {
   [ -x "$DAEMON" ] || { echo "HOTR executable missing: $DAEMON" >>"$LOGFILE"; return 1; }
   hotr_running && return 0
 
+  rotate_log
   cleanup_stale_qipc
+  scan_status=10
+  scan_attempts=0
   if [ -x "$AUTOCONFIG" ]; then
     # USB serial devices and the option driver can appear after the service.
     # Retry briefly so boot does not permanently capture an empty/stale scan.
     for attempt in $(seq 1 20); do
+      scan_attempts="$attempt"
       # The connected-gun set can change between boots, so boot is a forced
       # full scan rather than a one-time initialization.
-      python3 "$AUTOCONFIG" --force >>"$LOGFILE" 2>&1 || true
-      if find -L /dev/serial/by-id /dev/serial/by-path /dev/hotr -type c -print -quit 2>/dev/null | grep -q .; then
-        break
-      fi
-      sleep 1
+      python3 "$AUTOCONFIG" --force >>"$LOGFILE" 2>&1
+      scan_status=$?
+      case "$scan_status" in
+        0)
+          # The detector has already identified the gun and written the
+          # current ttyUSB/ttyACM path. Do not infer success from a particular
+          # udev symlink being present.
+          break
+          ;;
+        10)
+          # USB enumeration can lag behind the service during boot.
+          sleep 1
+          ;;
+        *)
+          echo "HOTR autoconfiguration failed with status $scan_status" >>"$LOGFILE"
+          # A configuration error is not normally fixed by waiting for USB
+          # enumeration; leave the error visible and continue starting HOTR.
+          break
+          ;;
+      esac
     done
+    case "$scan_status" in
+      0)  echo "HOTR autoconfiguration complete: guns configured successfully after $scan_attempts attempt(s)" >>"$LOGFILE" ;;
+      10) echo "HOTR autoconfiguration complete: no supported guns detected after $scan_attempts attempt(s)" >>"$LOGFILE" ;;
+      *)  echo "HOTR autoconfiguration stopped with error status $scan_status after $scan_attempts attempt(s)" >>"$LOGFILE" ;;
+    esac
   fi
 
   export DISPLAY=:0
   export HOME=/userdata/system
   export XDG_CONFIG_HOME=/userdata/system/configs
-  export QT_QPA_PLATFORM=xcb
+  # HOTR runs headlessly as a background daemon. Allow an override for
+  # hardware/builds that require another Qt backend.
+  export QT_QPA_PLATFORM="${HOTR_QT_PLATFORM:-offscreen}"
   export HOTR_DATA_DIR="$DATADIR"
   unset XDG_RUNTIME_DIR
+
+  # HOTR's Linux TCP client connects to this localhost broker. The broker's
+  # per-gun workers own the physical tty and expose PTYs to Batocera Mono.
+  start_sinden_broker
+
+  # Allow user hardware preparation before the daemon opens its devices.
+  [ -x "$ROOT/scripts/custom-boot.sh" ] && "$ROOT/scripts/custom-boot.sh" >>"$LOGFILE" 2>&1 || true
 
   cd "$APPDIR" || return 1
   # Batocera's v44 launcher waits for inherited pipes to close. start-stop-
@@ -88,7 +170,17 @@ start_hotr() {
     nohup "$DAEMON" --no-ui </dev/null >>"$LOGFILE" 2>&1 &
   fi
 
-  [ -x "$ROOT/scripts/custom-boot.sh" ] && "$ROOT/scripts/custom-boot.sh" >>"$LOGFILE" 2>&1 || true
+  # Detect an immediate AppImage/Qt/startup failure instead of reporting a
+  # successful service start while HOTR has already exited.
+  for attempt in 1 2 3 4 5; do
+    if hotr_running; then
+      echo "HOTR daemon started successfully (pid(s): $(hotr_pids | tr '\n' ' '))" >>"$LOGFILE"
+      return 0
+    fi
+    sleep 1
+  done
+  echo "HOTR daemon failed to remain running after startup" >>"$LOGFILE"
+  return 1
 }
 
 stop_hotr() {
@@ -102,12 +194,15 @@ stop_hotr() {
     tries=$((tries + 1))
   done
   if hotr_running; then
+    echo "HOTR daemon did not stop cleanly; sending SIGKILL" >>"$LOGFILE"
     for pid in $(hotr_pids); do kill -KILL "$pid" 2>/dev/null || true; done
   fi
 
   # Normally the AppImage runtime exits with its payload. Clean up a stranded
   # runtime only after the real HOTR payload has gone away.
   for runtime in $(hotr_runtime_pids); do kill -TERM "$runtime" 2>/dev/null || true; done
+
+  stop_sinden_broker
 
   [ -x "$ROOT/scripts/custom-stop.sh" ] && "$ROOT/scripts/custom-stop.sh" >>"$LOGFILE" 2>&1 || true
 }

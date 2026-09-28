@@ -33,6 +33,14 @@ mkdir -p "$BATOCERA_TREE/.hotr-sources"
 rsync -a --delete  --exclude '.git/' --exclude 'build*/' "$DUCKSTATION_SOURCE/" "$BATOCERA_TREE/.hotr-sources/duckstation-lightgun-src/"
 rsync -a --delete --exclude '.git/' --exclude 'build*/'  "$PCSX2_SOURCE/" "$BATOCERA_TREE/.hotr-sources/pcsx2-lightgun-src/"
 
+# Local-site Buildroot packages do not reliably apply package-directory
+# patches, so apply the BIOS lookup patch to the staged source explicitly.
+PCSX2_PATCH="$HERE/recipes/package/batocera/emulators/pcsx2-lightgun/006-patches-in-bios-folder.patch"
+PCSX2_STAGED="$BATOCERA_TREE/.hotr-sources/pcsx2-lightgun-src/pcsx2/Patch.cpp"
+if grep -q 'Path::Combine(EmuFolders::Resources, PATCHES_ZIP_NAME)' "$PCSX2_STAGED"; then
+  patch -d "$BATOCERA_TREE/.hotr-sources/pcsx2-lightgun-src" -p1 --forward --batch < "$PCSX2_PATCH"
+fi
+
 # Install the old known-working package recipes/patches into the Batocera tree.
 mkdir -p "$BATOCERA_TREE/package/batocera/emulators" "$BATOCERA_TREE/package/batocera/libraries/rapidyaml"
 rsync -a --delete "$HERE/recipes/package/batocera/emulators/duckstation-lightgun/" "$BATOCERA_TREE/package/batocera/emulators/duckstation-lightgun/"

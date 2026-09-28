@@ -16,6 +16,9 @@ payload, and the local Buildroot emulator toolchain.
 | `payload/system/99-hotr.rules` | HOTR USB permissions and serial aliases. |
 | `payload/bios/ps2/patches.zip` | PCSX2 game patch archive bundled from the Buildroot output. |
 | `scripts/hotr-service` | Background HOTR service. |
+| `payload/system/hotr-sinden-broker.py` | Optional HOTR TCP-to-Sinden serial broker and per-gun PTY worker. |
+| `payload/system/hotr-sinden-worker-launch` | Stable per-gun worker/PTY launcher used by Batocera's Sinden helper. |
+| `scripts/patch-batocera-sinden-hotr.sh` | Optional broker hook; restores the stock helper with `remove`. |
 | `scripts/hotr-configgen-launch` | Emulator launcher and temporary PCSX2 fullscreen workaround. |
 | `scripts/patch-batocera-sinden.sh` | Optional Sinden patch: `apply` or `remove`; creates a backup. |
 | `scripts/ports/HookOfTheReaper.sh` | Opens the HOTR configuration UI. |
@@ -23,10 +26,19 @@ payload, and the local Buildroot emulator toolchain.
 
 ## Testing
 
+All repository tests live under `scripts/tests/`. The installer includes only
+the two comprehensive Sinden tests; the smaller tests remain available for
+development and regression checks.
+
 | Path | Purpose |
 | --- | --- |
-| `scripts/test-hotr-autoconfig.sh` | Simulated serial and HID discovery/config merge test. |
-| `scripts/test-sinden-pipeline.sh` | Sinden helper/static checks and loopback TCP test. |
+| `scripts/tests/test-hotr-autoconfig.sh` | Simulated serial and HID discovery/config merge test. |
+| `scripts/tests/test-sinden-pipeline.sh` | Sinden helper/static checks and loopback TCP test. |
+| `scripts/tests/hotr-sinden-broker-selftest.sh` | Hardware-free TCP-to-serial-frame translation test. |
+| `scripts/tests/hotr-sinden-worker-selftest.sh` | Hardware-free end-to-end TCP, worker, fake serial and Mono-PTY test. |
+| `scripts/tests/hotr-sinden-integration-selftest.sh` | Installed-path test using a pseudo-terminal as an emulated Sinden gun. |
+| `scripts/tests/hotr-sinden-full-selftest.sh` | Comprehensive multi-gun, protocol, PTY, mapping and v43/v44 helper-contract test with a full report. |
+| `scripts/tests/hotr-sinden-native-helper-selftest.py` | Native-helper simulation with fake udev discovery, serial device, Mono launch and HOTR recoil. |
 | `check-install.sh` | Inspect an installed Batocera system. |
 | `buildroot/check-runtime-abi.py` | Check emulator runtime dependencies. |
 

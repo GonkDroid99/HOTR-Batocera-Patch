@@ -11,6 +11,8 @@ check /userdata/system/configs/emulationstation/es_features_hotr.cfg
 check_exec /userdata/system/services/hotr
 check_exec /userdata/system/hotr/software/hook-of-the-reaper/hook-of-the-reaper
 check_exec /userdata/system/hotr/bin/hotr-configgen-launch
+check_exec /userdata/system/hotr/bin/hotr-sinden-broker.py
+check_exec /userdata/system/hotr/bin/hotr-sinden-worker-launch
 check_exec /userdata/system/hotr/tools/hotr-debug-report.sh
 check_exec /userdata/system/hotr/emulators/duckstation/MameOutputSender
 check_exec /userdata/system/hotr/emulators/pcsx2/MameOutputSender
@@ -23,6 +25,17 @@ check "$GENROOT/lightgun_rs3.py"
 check /etc/udev/rules.d/99-hotr.rules
 check /etc/udev/rules.d/99-retroshooter-joystick-override.rules
 check /userdata/saves/mame/plugins/stateoutput/plugin.json
+
+if [ -f /userdata/system/hotr/sinden-tcp.enabled ]; then
+  check /userdata/system/hotr/tools/patch-batocera-sinden-hotr.sh
+  if grep -q 'HOTR SINDEN BROKER INTEGRATION' /usr/bin/virtual-sindenlightgun-add 2>/dev/null; then
+    echo '[OK] Batocera Sinden helper is connected to HOTR broker'
+  else
+    echo '[MISSING] Batocera Sinden helper broker hook'; ok=0
+  fi
+else
+  echo '[INFO] Sinden HOTR recoil broker is disabled'
+fi
 
 grep -q 'pluginsToLoad += \[ "stateoutput" \]' "$GENROOT/mame/mameGenerator.py" 2>/dev/null && echo '[OK] MAME stateoutput enabled in configgen' || { echo '[MISSING] MAME stateoutput configgen patch'; ok=0; }
 grep -Eq '^[[:space:]]*output[[:space:]]+network' /userdata/system/configs/mame/mame.ini 2>/dev/null && echo '[OK] MAME output network' || { echo '[MISSING] MAME output network'; ok=0; }

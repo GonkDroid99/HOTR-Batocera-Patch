@@ -8,6 +8,12 @@ GENROOT="$(printf '%s\n' /usr/lib/python*/site-packages/configgen/generators | s
 command -v batocera-services >/dev/null && batocera-services disable hotr 2>/dev/null || true
 /userdata/system/services/hotr stop 2>/dev/null || true
 
+# Restore Batocera's native Sinden helper if the HOTR broker integration was
+# enabled. This is separate from the optional Batocera detection workaround.
+if [ -x "$HOTR/tools/patch-batocera-sinden-hotr.sh" ]; then
+  "$HOTR/tools/patch-batocera-sinden-hotr.sh" remove 2>/dev/null || true
+fi
+
 # Restore stock Batocera Sinden helpers if the optional compatibility patch was
 # applied. This is independent of the HOTR installation directory.
 if [ -x "$BASE/scripts/patch-batocera-sinden.sh" ]; then
@@ -33,6 +39,7 @@ rm -f /etc/udev/rules.d/99-hotr.rules /etc/udev/rules.d/99-retroshooter-joystick
 rm -f /usr/bin/batocera-config-duckstation-hotr /usr/bin/batocera-config-pcsx2-hotr /usr/bin/batocera-config-hotr
 rm -f /usr/share/applications/duckstation-hotr-config.desktop /usr/share/applications/pcsx2-hotr-config.desktop /usr/share/applications/hotr-config.desktop
 rm -f /usr/share/duckstation-lightgun
+rm -f "$HOTR/sinden-tcp.enabled"
 command -v batocera-save-overlay >/dev/null && batocera-save-overlay || true
 rm -rf "$HOTR"
 echo 'HOTR integration removed. Persistent /userdata/system/hook-of-the-reaper data/defaultLG remains.'
