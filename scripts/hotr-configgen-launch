@@ -21,7 +21,14 @@ case "$SYSTEM" in
     ;;
 esac
 
-exec python3 -m configgen.emulatorlauncher \
+LAUNCHER=(python3 -m configgen.emulatorlauncher)
+# Batocera 44 introduced batocera-launch and retained the old Python module
+# only as a compatibility stub. Batocera 43 does not provide batocera-launch.
+if command -v batocera-launch >/dev/null 2>&1; then
+  LAUNCHER=(batocera-launch)
+fi
+
+exec "${LAUNCHER[@]}" \
   "$@" \
   -system "$SYSTEM" \
   -emulator "$EMULATOR" \

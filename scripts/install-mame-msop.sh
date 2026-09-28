@@ -45,14 +45,21 @@ fi
 python3 - "$MAME_GEN" <<'PY'
 from pathlib import Path
 import sys
+import re
 p = Path(sys.argv[1])
 s = p.read_text()
-if 'pluginsToLoad += [ "stateoutput" ]' not in s:
-    marker = '    pluginsToLoad = []\n'
-    if marker not in s:
-        raise SystemExit('HOTR: could not locate MAME pluginsToLoad initialization')
-    s = s.replace(marker, marker + '    pluginsToLoad += [ "stateoutput" ]\n', 1)
-    p.write_text(s)
+match = re.search(r'^(?P<indent>[ \t]*)pluginsToLoad[ \t]*=[ \t]*\[\][ \t]*$', s, re.MULTILINE)
+if not match:
+    raise SystemExit('HOTR: could not locate MAME pluginsToLoad initialization')
+indent = match.group('indent')
+state_line = f'{indent}pluginsToLoad += [ "stateoutput" ]'
+# Remove an existing malformed/incorrectly indented insertion, then add it
+# beside the initialization using the file's actual indentation style.
+s = re.sub(r'^[ \t]*pluginsToLoad[ \t]*\+=[ \t]*\[[ \t]*["\']stateoutput["\'][ \t]*\][ \t]*\n?', '', s, flags=re.MULTILINE)
+match = re.search(r'^(?P<indent>[ \t]*)pluginsToLoad[ \t]*=[ \t]*\[\][ \t]*$', s, re.MULTILINE)
+indent = match.group('indent')
+s = s[:match.end()] + '\n' + f'{indent}pluginsToLoad += [ "stateoutput" ]' + s[match.end():]
+p.write_text(s)
 PY
 
 echo "HOTR: installed MSOP ${MSOP_VERSION} and enabled MAME network/stateoutput."

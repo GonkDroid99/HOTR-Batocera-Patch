@@ -3,8 +3,21 @@ from __future__ import annotations
 from pathlib import Path
 
 from ...batoceraPaths import CONFIGS
-from ...utils.configparser import CaseSensitiveConfigParser
-from ..duckstation.duckstationGenerator import DuckstationGenerator
+try:
+    from ...utils.configparser import CaseSensitiveConfigParser
+except ImportError:  # Batocera 44 moved the helper out of configgen.utils.
+    from configparser import ConfigParser
+
+    class CaseSensitiveConfigParser(ConfigParser):
+        def optionxform(self, optionstr):
+            return optionstr
+try:
+    from ..duckstation.duckstationGenerator import DuckstationGenerator
+    _LEGACY_CONFIGGEN = True
+except ImportError:  # Batocera 44 keeps DuckStation in batocera-launch.
+    from configgen.Command import Command
+    from ..Generator import Generator as DuckstationGenerator
+    _LEGACY_CONFIGGEN = False
 from ..lightgun_rs3 import count_rs3_guns
 from ..hotr_lightgun_mapping import (
     axis_mode, detected_layout_name, duckstation_button, duckstation_relative_axes, logical_for,
@@ -22,7 +35,19 @@ class DuckstationLightgunGenerator(DuckstationGenerator):
         # MameOutputSender/resources live beside the HOTR build.
         return _DUCK_HOTR_DIR
 
+    def getHotkeysContext(self):
+        return {'name': 'duckstation-lightgun', 'keys': {}}
+
     def generate(self, system, rom, playersControllers, metadata, guns, wheels, gameResolution):
+        if not _LEGACY_CONFIGGEN:
+            return Command(
+                [str(_DUCK_HOTR_QT), '-batch', '-fullscreen', str(rom)],
+                {
+                    'XDG_CONFIG_HOME': str(_DUCK_HOTR_CONFIG_DIR.parent),
+                    'DISPLAY': ':0',
+                    'QT_QPA_PLATFORM': 'xcb',
+                },
+            )
         cmd = super().generate(system, rom, playersControllers, metadata, guns, wheels, gameResolution)
 
         # This generator exists only for the HOTR core, so always replace the
@@ -37,6 +62,8 @@ class DuckstationLightgunGenerator(DuckstationGenerator):
         # build follows XDG_CONFIG_HOME for its settings file; its patched
         # absolute data directories remain shared only for resources/saves.
         cmd.env["XDG_CONFIG_HOME"] = str(_DUCK_HOTR_CONFIG_DIR.parent)
+        cmd.env["DISPLAY"] = ":0"
+        cmd.env["QT_QPA_PLATFORM"] = "xcb"
         settings_path = _DUCK_HOTR_CONFIG_DIR / "settings.ini"
         stock_settings_path = CONFIGS / "duckstation" / "settings.ini"
         settings = CaseSensitiveConfigParser(interpolation=None)

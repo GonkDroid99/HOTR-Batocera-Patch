@@ -4,12 +4,25 @@ from pathlib import Path
 from typing import Final
 
 from ...batoceraPaths import CONFIGS
-from ...utils.configparser import CaseSensitiveConfigParser
+try:
+    from ...utils.configparser import CaseSensitiveConfigParser
+except ImportError:  # Batocera 44 moved the helper out of configgen.utils.
+    from configparser import ConfigParser
+
+    class CaseSensitiveConfigParser(ConfigParser):
+        def optionxform(self, optionstr):
+            return optionstr
 from ..lightgun_rs3 import count_rs3_guns
 from ..hotr_lightgun_mapping import (
     axis_mode, detected_layout_name, logical_for, pcsx2_button, pcsx2_relative_axes,
 )
-from ..pcsx2.pcsx2Generator import Pcsx2Generator
+try:
+    from ..pcsx2.pcsx2Generator import Pcsx2Generator
+    _LEGACY_CONFIGGEN = True
+except ImportError:  # Batocera 44 uses batocera_launch.emulators.pcsx2x6.
+    from configgen.Command import Command
+    from ..Generator import Generator as Pcsx2Generator
+    _LEGACY_CONFIGGEN = False
 
 _PCSX2_LIGHTGUN_BIN_DIR: Final = Path("/userdata/system/hotr/emulators/pcsx2")
 _PCSX2_LIGHTGUN_BIN: Final = _PCSX2_LIGHTGUN_BIN_DIR / "pcsx2-lightgun-qt"
@@ -24,7 +37,32 @@ class Pcsx2LightgunGenerator(Pcsx2Generator):
     def executionDirectory(self, config, rom):
         return _PCSX2_LIGHTGUN_BIN_DIR
 
+    def getHotkeysContext(self):
+        return {'name': 'pcsx2-lightgun', 'keys': {}}
+
+    async def configure(self):
+        """Adapt the Batocera 44 Emulator API to the private HOTR binary."""
+        if _LEGACY_CONFIGGEN:
+            return await super().configure()
+        command = await super().configure()
+        command.array[0] = str(_PCSX2_LIGHTGUN_BIN)
+        command.env['XDG_CONFIG_HOME'] = str(_PCSX2_LIGHTGUN_XDG_HOME)
+        command.env['LD_LIBRARY_PATH'] = str(_PCSX2_LIGHTGUN_LIB_DIR)
+        if '-fastboot' not in command.array:
+            command.array.insert(1, '-fastboot')
+        return command
+
     def generate(self, system, rom, playersControllers, metadata, guns, wheels, gameResolution):
+        if not _LEGACY_CONFIGGEN:
+            return Command(
+                [str(_PCSX2_LIGHTGUN_BIN), '-nogui', '-fastboot', str(rom)],
+                {
+                    'XDG_CONFIG_HOME': str(_PCSX2_LIGHTGUN_XDG_HOME),
+                    'LD_LIBRARY_PATH': str(_PCSX2_LIGHTGUN_LIB_DIR),
+                    'DISPLAY': ':0',
+                    'QT_QPA_PLATFORM': 'xcb',
+                },
+            )
         cmd = super().generate(system, rom, playersControllers, metadata, guns, wheels, gameResolution)
 
         if cmd.array:
@@ -42,6 +80,8 @@ class Pcsx2LightgunGenerator(Pcsx2Generator):
             if existing_ld_library_path
             else str(_PCSX2_LIGHTGUN_LIB_DIR)
         )
+        cmd.env["DISPLAY"] = ":0"
+        cmd.env["QT_QPA_PLATFORM"] = "xcb"
 
         reg_dir = _PCSX2_LIGHTGUN_CONFIG_DIR
         reg_dir.mkdir(parents=True, exist_ok=True)
