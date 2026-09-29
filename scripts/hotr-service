@@ -17,6 +17,13 @@ MAX_LOG_BYTES=1048576
 
 mkdir -p /userdata/system/logs
 
+SERVICE_ACTION="${1:-unknown}"
+SERVICE_BOOT_ID="$(cat /proc/sys/kernel/random/boot_id 2>/dev/null || echo unknown)"
+service_log(){
+  printf '[%s] %s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$*" >>"$LOGFILE"
+}
+service_log "HOTR service script started: action=${SERVICE_ACTION} pid=$$ boot_id=${SERVICE_BOOT_ID}"
+
 rotate_log() {
   [ -f "$LOGFILE" ] || return 0
   [ "$(wc -c <"$LOGFILE" 2>/dev/null || echo 0)" -lt "$MAX_LOG_BYTES" ] && return 0
@@ -127,7 +134,7 @@ start_hotr() {
           sleep 1
           ;;
         *)
-          echo "HOTR autoconfiguration failed with status $scan_status" >>"$LOGFILE"
+          service_log "HOTR autoconfiguration failed with status $scan_status"
           # A configuration error is not normally fixed by waiting for USB
           # enumeration; leave the error visible and continue starting HOTR.
           break
@@ -135,9 +142,9 @@ start_hotr() {
       esac
     done
     case "$scan_status" in
-      0)  echo "HOTR autoconfiguration complete: guns configured successfully after $scan_attempts attempt(s)" >>"$LOGFILE" ;;
-      10) echo "HOTR autoconfiguration complete: no supported guns detected after $scan_attempts attempt(s)" >>"$LOGFILE" ;;
-      *)  echo "HOTR autoconfiguration stopped with error status $scan_status after $scan_attempts attempt(s)" >>"$LOGFILE" ;;
+      0)  service_log "HOTR autoconfiguration complete: guns configured successfully after $scan_attempts attempt(s)" ;;
+      10) service_log "HOTR autoconfiguration complete: no supported guns detected after $scan_attempts attempt(s)" ;;
+      *)  service_log "HOTR autoconfiguration stopped with error status $scan_status after $scan_attempts attempt(s)" ;;
     esac
   fi
 
@@ -174,12 +181,12 @@ start_hotr() {
   # successful service start while HOTR has already exited.
   for attempt in 1 2 3 4 5; do
     if hotr_running; then
-      echo "HOTR daemon started successfully (pid(s): $(hotr_pids | tr '\n' ' '))" >>"$LOGFILE"
+      service_log "HOTR daemon started successfully (pid(s): $(hotr_pids | tr '\n' ' '))"
       return 0
     fi
     sleep 1
   done
-  echo "HOTR daemon failed to remain running after startup" >>"$LOGFILE"
+  service_log "HOTR daemon failed to remain running after startup"
   return 1
 }
 
@@ -194,7 +201,7 @@ stop_hotr() {
     tries=$((tries + 1))
   done
   if hotr_running; then
-    echo "HOTR daemon did not stop cleanly; sending SIGKILL" >>"$LOGFILE"
+    service_log "HOTR daemon did not stop cleanly; sending SIGKILL"
     for pid in $(hotr_pids); do kill -KILL "$pid" 2>/dev/null || true; done
   fi
 

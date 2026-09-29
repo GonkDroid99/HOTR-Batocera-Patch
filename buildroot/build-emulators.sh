@@ -3,6 +3,36 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/.." && pwd)"
 CONF="${HOTR_BUILD_CONF:-$HERE/buildroot.conf}"
+
+BUILD_EMULATOR="both"
+usage(){
+  cat <<EOF
+Usage: $0 [--pcsx2|--duckstation|--both|--emulator NAME]
+
+Build one emulator or both (default).
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --pcsx2) BUILD_EMULATOR="pcsx2"; shift ;;
+    --duckstation) BUILD_EMULATOR="duckstation"; shift ;;
+    --both) BUILD_EMULATOR="both"; shift ;;
+    --emulator)
+      [ "$#" -ge 2 ] || { echo "ERROR: --emulator needs pcsx2, duckstation, or both." >&2; usage >&2; exit 2; }
+      BUILD_EMULATOR="$2"
+      shift 2
+      ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "ERROR: unknown argument: $1" >&2; usage >&2; exit 2 ;;
+  esac
+done
+
+case "$BUILD_EMULATOR" in
+  pcsx2|duckstation|both) ;;
+  *) echo "ERROR: emulator must be pcsx2, duckstation, or both: $BUILD_EMULATOR" >&2; exit 2 ;;
+esac
+
 [ -f "$CONF" ] || { echo "ERROR: $CONF missing. Copy buildroot.conf.example to buildroot.conf and edit it." >&2; exit 2; }
 # shellcheck disable=SC1090
 . "$CONF"
@@ -12,8 +42,12 @@ AUTO_CLONE_BATOCERA="${AUTO_CLONE_BATOCERA:-0}"
 
 need(){ command -v "$1" >/dev/null || { echo "ERROR: missing $1" >&2; exit 2; }; }
 need git; need rsync; need tar; need make; need python3
-[ -d "$DUCKSTATION_SOURCE" ] || { echo "ERROR: DuckStation source not found: $DUCKSTATION_SOURCE" >&2; exit 2; }
-[ -d "$PCSX2_SOURCE" ] || { echo "ERROR: PCSX2 source not found: $PCSX2_SOURCE" >&2; exit 2; }
+if [ "$BUILD_EMULATOR" = "both" ] || [ "$BUILD_EMULATOR" = "duckstation" ]; then
+  [ -d "$DUCKSTATION_SOURCE" ] || { echo "ERROR: DuckStation source not found: $DUCKSTATION_SOURCE" >&2; exit 2; }
+fi
+if [ "$BUILD_EMULATOR" = "both" ] || [ "$BUILD_EMULATOR" = "pcsx2" ]; then
+  [ -d "$PCSX2_SOURCE" ] || { echo "ERROR: PCSX2 source not found: $PCSX2_SOURCE" >&2; exit 2; }
+fi
 
 if [ ! -d "$BATOCERA_TREE/.git" ]; then
   [ "$AUTO_CLONE_BATOCERA" = 1 ] || { echo "ERROR: Batocera tree missing: $BATOCERA_TREE" >&2; exit 2; }
@@ -30,21 +64,21 @@ grep -q 'batocera.linux 43' "$BATOCERA_TREE/batocera-Changelog.md" || echo "WARN
 
 # Stage custom source INSIDE the Batocera tree so its build Docker container can see it.
 mkdir -p "$BATOCERA_TREE/.hotr-sources"
-rsync -a --delete  --exclude '.git/' --exclude 'build*/' "$DUCKSTATION_SOURCE/" "$BATOCERA_TREE/.hotr-sources/duckstation-lightgun-src/"
-rsync -a --delete --exclude '.git/' --exclude 'build*/'  "$PCSX2_SOURCE/" "$BATOCERA_TREE/.hotr-sources/pcsx2-lightgun-src/"
-
-# Local-site Buildroot packages do not reliably apply package-directory
-# patches, so apply the BIOS lookup patch to the staged source explicitly.
-PCSX2_PATCH="$HERE/recipes/package/batocera/emulators/pcsx2-lightgun/006-patches-in-bios-folder.patch"
-PCSX2_STAGED="$BATOCERA_TREE/.hotr-sources/pcsx2-lightgun-src/pcsx2/Patch.cpp"
-if grep -q 'Path::Combine(EmuFolders::Resources, PATCHES_ZIP_NAME)' "$PCSX2_STAGED"; then
-  patch -d "$BATOCERA_TREE/.hotr-sources/pcsx2-lightgun-src" -p1 --forward --batch < "$PCSX2_PATCH"
+if [ "$BUILD_EMULATOR" = "both" ] || [ "$BUILD_EMULATOR" = "duckstation" ]; then
+  rsync -a --delete --exclude '.git/' --exclude 'build*/' "$DUCKSTATION_SOURCE/" "$BATOCERA_TREE/.hotr-sources/duckstation-lightgun-src/"
+fi
+if [ "$BUILD_EMULATOR" = "both" ] || [ "$BUILD_EMULATOR" = "pcsx2" ]; then
+  rsync -a --delete --exclude '.git/' --exclude 'build*/' "$PCSX2_SOURCE/" "$BATOCERA_TREE/.hotr-sources/pcsx2-lightgun-src/"
 fi
 
 # Install the old known-working package recipes/patches into the Batocera tree.
 mkdir -p "$BATOCERA_TREE/package/batocera/emulators" "$BATOCERA_TREE/package/batocera/libraries/rapidyaml"
-rsync -a --delete "$HERE/recipes/package/batocera/emulators/duckstation-lightgun/" "$BATOCERA_TREE/package/batocera/emulators/duckstation-lightgun/"
-rsync -a --delete "$HERE/recipes/package/batocera/emulators/pcsx2-lightgun/" "$BATOCERA_TREE/package/batocera/emulators/pcsx2-lightgun/"
+if [ "$BUILD_EMULATOR" = "both" ] || [ "$BUILD_EMULATOR" = "duckstation" ]; then
+  rsync -a --delete "$HERE/recipes/package/batocera/emulators/duckstation-lightgun/" "$BATOCERA_TREE/package/batocera/emulators/duckstation-lightgun/"
+fi
+if [ "$BUILD_EMULATOR" = "both" ] || [ "$BUILD_EMULATOR" = "pcsx2" ]; then
+  rsync -a --delete "$HERE/recipes/package/batocera/emulators/pcsx2-lightgun/" "$BATOCERA_TREE/package/batocera/emulators/pcsx2-lightgun/"
+fi
 rsync -a --delete "$HERE/recipes/package/batocera/libraries/rapidyaml/" "$BATOCERA_TREE/package/batocera/libraries/rapidyaml/"
 
 # Buildroot external packages are picked up from their .mk files. Batocera's
@@ -53,46 +87,63 @@ rsync -a --delete "$HERE/recipes/package/batocera/libraries/rapidyaml/" "$BATOCE
 cd "$BATOCERA_TREE"
 
 echo "=== Cleaning previous HOTR emulator builds ==="
-rm -rf "$BATOCERA_TREE/output/$BATOCERA_TARGET/build/duckstation-lightgun-"*
-rm -rf "$BATOCERA_TREE/output/$BATOCERA_TARGET/build/pcsx2-lightgun-"*
+if [ "$BUILD_EMULATOR" = "both" ] || [ "$BUILD_EMULATOR" = "duckstation" ]; then
+  rm -rf "$BATOCERA_TREE/output/$BATOCERA_TARGET/build/duckstation-lightgun-"*
+fi
+if [ "$BUILD_EMULATOR" = "both" ] || [ "$BUILD_EMULATOR" = "pcsx2" ]; then
+  rm -rf "$BATOCERA_TREE/output/$BATOCERA_TARGET/build/pcsx2-lightgun-"*
+fi
 
-echo "=== Building PCSX2 LightGun for $BATOCERA_TARGET ==="
-make "${BATOCERA_TARGET}-pkg" PKG=pcsx2-lightgun
-
-echo "=== Building DuckStation LightGun for $BATOCERA_TARGET ==="
-make "${BATOCERA_TARGET}-pkg" PKG=duckstation-lightgun
+if [ "$BUILD_EMULATOR" = "both" ] || [ "$BUILD_EMULATOR" = "pcsx2" ]; then
+  echo "=== Building PCSX2 LightGun for $BATOCERA_TARGET ==="
+  make "${BATOCERA_TARGET}-pkg" PKG=pcsx2-lightgun
+fi
+if [ "$BUILD_EMULATOR" = "both" ] || [ "$BUILD_EMULATOR" = "duckstation" ]; then
+  echo "=== Building DuckStation LightGun for $BATOCERA_TARGET ==="
+  make "${BATOCERA_TARGET}-pkg" PKG=duckstation-lightgun
+fi
 
 
 TARGET="$BATOCERA_TREE/output/$BATOCERA_TARGET/target"
 DIST="$ROOT/dist/buildroot-binaries"
 rm -rf "$DIST"
-mkdir -p "$DIST/duckstation" "$DIST/pcsx2"
+mkdir -p "$DIST"
 
 # Collect exactly the runtime files the bootstrap installer needs.
-install -m 0755 "$TARGET/usr/bin/duckstation-lightgun-qt" "$DIST/duckstation/duckstation-lightgun-qt"
-[ -f "$TARGET/usr/bin/duckstation-lightgun-nogui" ] && install -m 0755 "$TARGET/usr/bin/duckstation-lightgun-nogui" "$DIST/duckstation/duckstation-lightgun-nogui" || true
-cp -a "$TARGET/usr/share/duckstation-lightgun/resources" "$DIST/duckstation/" 2>/dev/null || true
-cp -a "$TARGET/usr/share/duckstation-lightgun/translations" "$DIST/duckstation/" 2>/dev/null || true
-install -m 0755 "$HERE/recipes/package/batocera/emulators/duckstation-lightgun/MameOutputSender" "$DIST/duckstation/MameOutputSender"
+if [ "$BUILD_EMULATOR" = "both" ] || [ "$BUILD_EMULATOR" = "duckstation" ]; then
+  mkdir -p "$DIST/duckstation"
+  install -m 0755 "$TARGET/usr/bin/duckstation-lightgun-qt" "$DIST/duckstation/duckstation-lightgun-qt"
+  [ -f "$TARGET/usr/bin/duckstation-lightgun-nogui" ] && install -m 0755 "$TARGET/usr/bin/duckstation-lightgun-nogui" "$DIST/duckstation/duckstation-lightgun-nogui" || true
+  cp -a "$TARGET/usr/share/duckstation-lightgun/resources" "$DIST/duckstation/" 2>/dev/null || true
+  cp -a "$TARGET/usr/share/duckstation-lightgun/translations" "$DIST/duckstation/" 2>/dev/null || true
+  install -m 0755 "$HERE/recipes/package/batocera/emulators/duckstation-lightgun/MameOutputSender" "$DIST/duckstation/MameOutputSender"
+fi
 
-PCSX2ROOT="$TARGET/usr/pcsx2-lightgun/bin"
-install -m 0755 "$PCSX2ROOT/pcsx2-lightgun-qt" "$DIST/pcsx2/pcsx2-lightgun-qt"
-[ -d "$PCSX2ROOT/resources" ] && cp -a "$PCSX2ROOT/resources" "$DIST/pcsx2/"
-[ -d "$PCSX2ROOT/translations" ] && cp -a "$PCSX2ROOT/translations" "$DIST/pcsx2/"
+if [ "$BUILD_EMULATOR" = "both" ] || [ "$BUILD_EMULATOR" = "pcsx2" ]; then
+  mkdir -p "$DIST/pcsx2"
+  PCSX2ROOT="$TARGET/usr/pcsx2-lightgun/bin"
+  install -m 0755 "$PCSX2ROOT/pcsx2-lightgun-qt" "$DIST/pcsx2/pcsx2-lightgun-qt"
+  [ -d "$PCSX2ROOT/resources" ] && cp -a "$PCSX2ROOT/resources" "$DIST/pcsx2/"
+  [ -d "$PCSX2ROOT/translations" ] && cp -a "$PCSX2ROOT/translations" "$DIST/pcsx2/"
+  [ -d "$ROOT/payload/emulators/pcsx2/cheats" ] && \
+    cp -a "$ROOT/payload/emulators/pcsx2/cheats" "$DIST/pcsx2/"
+fi
 
-# The PCSX2 recipe installs the current official patch archive into the
-# Batocera datainit tree. Promote that exact artifact into the installer
-# payload so a bundled install can seed /userdata/bios/ps2/patches.zip.
-PATCHES="$TARGET/usr/share/batocera/datainit/bios/ps2/patches.zip"
-[ -s "$PATCHES" ] || { echo "ERROR: PCSX2 patches archive missing: $PATCHES" >&2; exit 3; }
-unzip -t "$PATCHES" >/dev/null || { echo "ERROR: Invalid PCSX2 patches archive: $PATCHES" >&2; exit 3; }
-install -m 0644 "$PATCHES" "$ROOT/payload/bios/ps2/patches.zip"
+# Promote the PCSX2 resource archive into the payload and runtime archive.
+if [ "$BUILD_EMULATOR" = "both" ] || [ "$BUILD_EMULATOR" = "pcsx2" ]; then
+  PATCHES="$TARGET/usr/pcsx2-lightgun/bin/resources/patches.zip"
+  [ -s "$PATCHES" ] || { echo "ERROR: PCSX2 patches archive missing: $PATCHES" >&2; exit 3; }
+  unzip -t "$PATCHES" >/dev/null || { echo "ERROR: Invalid PCSX2 patches archive: $PATCHES" >&2; exit 3; }
+  install -m 0644 "$PATCHES" "$ROOT/payload/emulators/pcsx2/resources/patches.zip"
+fi
 
 # PCSX2 LightGun links against rapidyaml 0.12.1. Keep that library private to
 # the HOTR build instead of installing/overriding it globally on Batocera.
-mkdir -p "$DIST/pcsx2/lib"
-cp -a "$TARGET/usr/lib/libryml.so"* "$DIST/pcsx2/lib/"
-install -m 0755 "$HERE/recipes/package/batocera/emulators/pcsx2-lightgun/MameOutputSender" "$DIST/pcsx2/MameOutputSender"
+if [ "$BUILD_EMULATOR" = "both" ] || [ "$BUILD_EMULATOR" = "pcsx2" ]; then
+  mkdir -p "$DIST/pcsx2/lib"
+  cp -a "$TARGET/usr/lib/libryml.so"* "$DIST/pcsx2/lib/"
+  install -m 0755 "$HERE/recipes/package/batocera/emulators/pcsx2-lightgun/MameOutputSender" "$DIST/pcsx2/MameOutputSender"
+fi
 
 # Native Batocera target binaries should naturally match the v43 runtime.
 # Print requirements where host tools can inspect them; absence is not fatal.
@@ -103,13 +154,16 @@ abi_report(){
     objdump -T "$f" 2>/dev/null | grep -oE 'GLIBC_[0-9.]+' | sort -Vu | tail -1 || true
   fi
 }
-abi_report "$DIST/duckstation/duckstation-lightgun-qt"
-abi_report "$DIST/pcsx2/pcsx2-lightgun-qt"
-
-tar -C "$DIST/duckstation" -czf "$DIST/duckstation-hotr.tar.gz" .
-tar -C "$DIST/pcsx2" -czf "$DIST/pcsx2-hotr.tar.gz" .
-sha256sum "$DIST/duckstation-hotr.tar.gz" "$DIST/pcsx2-hotr.tar.gz" > "$DIST/emulator-SHA256SUMS"
+if [ "$BUILD_EMULATOR" = "both" ] || [ "$BUILD_EMULATOR" = "duckstation" ]; then
+  abi_report "$DIST/duckstation/duckstation-lightgun-qt"
+  tar -C "$DIST/duckstation" -czf "$DIST/duckstation-hotr.tar.gz" .
+fi
+if [ "$BUILD_EMULATOR" = "both" ] || [ "$BUILD_EMULATOR" = "pcsx2" ]; then
+  abi_report "$DIST/pcsx2/pcsx2-lightgun-qt"
+  tar -C "$DIST/pcsx2" -czf "$DIST/pcsx2-hotr.tar.gz" .
+fi
+sha256sum "$DIST"/*-hotr.tar.gz > "$DIST/emulator-SHA256SUMS"
 
 echo
 echo "Built native Batocera runtime payloads:"
-ls -lh "$DIST/duckstation-hotr.tar.gz" "$DIST/pcsx2-hotr.tar.gz"
+ls -lh "$DIST"/*-hotr.tar.gz

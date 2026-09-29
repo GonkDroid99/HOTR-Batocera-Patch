@@ -13,9 +13,6 @@ except ImportError:  # Batocera 44 moved the helper out of configgen.utils.
         def optionxform(self, optionstr):
             return optionstr
 from ..lightgun_rs3 import count_rs3_guns
-from ..hotr_lightgun_mapping import (
-    axis_mode, detected_layout_name, logical_for, pcsx2_button, pcsx2_relative_axes,
-)
 try:
     from ..pcsx2.pcsx2Generator import Pcsx2Generator
     _LEGACY_CONFIGGEN = True
@@ -195,24 +192,6 @@ class Pcsx2LightgunGenerator(Pcsx2Generator):
         # action, start/select, SUB buttons and d-pad. In particular PCSX2's
         # stock mapping uses Action for C/pedal, Start for A, Select for B,
         # SUB1 for recalibration and SUB2 for GunCon Start.
-        action_defaults = {
-            "Trigger": "trigger",
-            # Time Crisis II needs rear/thumb exclusively for GunCon C/pedal.
-            # Sharing it with ShootOffscreen makes menu shooting work but breaks
-            # normal gameplay, so offscreen shooting is opt-in for PCSX2.
-            "ShootOffscreen": "disabled",
-            "C": "action",
-            "A": "start",
-            "B": "select",
-            "Recalibrate": "sub1",
-            "Start": "sub2",
-            "Select": "select",
-            "Up": "up",
-            "Down": "down",
-            "Left": "left",
-            "Right": "right",
-        }
-
         for usb_section, gun_idx in port_map:
             # completely rebuild USB section so no
             # stale guncon2_numdevice/button/SDL mappings survive.
@@ -221,26 +200,17 @@ class Pcsx2LightgunGenerator(Pcsx2Generator):
             pcsx2_config.add_section(usb_section)
 
             player = gun_idx + 1
-            gun = guns[gun_idx] if guns and gun_idx < len(guns) else None
-            layout = detected_layout_name(gun)
-
             pcsx2_config.set(usb_section, "Type", "guncon2")
             pcsx2_config.set(usb_section, "guncon2_cursor_path", "")
             pcsx2_config.set(usb_section, "guncon2_cursor_color", "#0000ff" if player == 1 else "#ff0000")
 
 
             # leave guncon2_numdevice unset; Batocera evdev selects by USB port
-            # Remove only keys owned by this HOTR mapping layer, then rebuild
-            # them from the selected semantic controls.
+            # Remove stale SDL mappings; native PCSX2/Batocera evdev handling
+            # owns the normal GunCon2 controls.
             for key in managed_keys:
                 if pcsx2_config.has_option(usb_section, key):
                     pcsx2_config.remove_option(usb_section, key)
-
-            for action, default in action_defaults.items():
-                logical = logical_for(system, "pcsx2", player, action.lower(), default)
-                value = pcsx2_button(layout, gun_idx, logical)
-                if value is not None:
-                    pass  # Native PCSX2/Batocera GunCon2 handling owns normal gun controls
 
             # Match stock Batocera PCSX2: configgen explicitly supplies only
             # the GunCon2 C/pedal key here. Other gun controls use PCSX2's

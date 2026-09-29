@@ -5,7 +5,13 @@ This uses the old working `duckstation-lightgun` and `pcsx2-lightgun` Buildroot 
 1. Copy `buildroot.conf.example` to `buildroot.conf`.
 2. Point `DUCKSTATION_SOURCE` and `PCSX2_SOURCE` at your current patched forks.
 3. Point `BATOCERA_TREE` at a Batocera 43/43.1 source checkout (or allow the script to clone it) and set `BATOCERA_REF` to the exact 43/43.1 ref/commit you want.
-4. Run `./buildroot/build-emulators.sh`.
+4. Run `./buildroot/build-emulators.sh` to build both emulators, or select one:
+   - `./buildroot/build-emulators.sh --pcsx2`
+   - `./buildroot/build-emulators.sh --duckstation`
+   - `./buildroot/build-emulators.sh --both`
+
+   The equivalent generic form is `--emulator pcsx2`, `--emulator duckstation`,
+   or `--emulator both`.
 
 Batocera exposes `make x86_64-pkg PKG=<package>` for individual package builds. The first run can still download/build the cross toolchain and dependencies, but it does not need to produce a Batocera image.
 

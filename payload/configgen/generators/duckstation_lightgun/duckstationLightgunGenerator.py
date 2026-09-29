@@ -19,9 +19,6 @@ except ImportError:  # Batocera 44 keeps DuckStation in batocera-launch.
     from ..Generator import Generator as DuckstationGenerator
     _LEGACY_CONFIGGEN = False
 from ..lightgun_rs3 import count_rs3_guns
-from ..hotr_lightgun_mapping import (
-    axis_mode, detected_layout_name, duckstation_button, duckstation_relative_axes, logical_for,
-)
 
 _DUCK_HOTR_DIR = Path("/userdata/system/hotr/emulators/duckstation")
 _DUCK_HOTR_QT = _DUCK_HOTR_DIR / "duckstation-lightgun-qt"
@@ -126,37 +123,16 @@ class DuckstationLightgunGenerator(DuckstationGenerator):
         gun_count = len(guns) if (system.config.use_guns and guns) else 0  # HOTR mouse-mode test: only Batocera-detected guns
 
         if guns:
-            # DuckStation GunCon exposes Trigger, ShootOffscreen, A and B.
-            # Keep Batocera's logical meanings but emit DuckStation SDL syntax.
-            defaults = {
-                "Trigger": "trigger",
-                "ShootOffscreen": "action",
-                "A": "start",
-                "B": "select",
-            }
             managed = (
                 "Trigger", "ShootOffscreen", "A", "B",
                 "RelativeLeft", "RelativeRight", "RelativeUp", "RelativeDown",
             )
-            for nplayer, gun in enumerate(guns[:8], start=1):
+            for nplayer in range(1, min(len(guns), 8) + 1):
                 pad_num = f"Pad{nplayer}"
-                sdl_index = nplayer - 1
                 if settings.has_option(pad_num, "Type") and settings.get(pad_num, "Type") == "GunCon":
-                    layout = detected_layout_name(gun)
                     for key in managed:
                         if settings.has_option(pad_num, key):
                             settings.remove_option(pad_num, key)
-                    for action, default in defaults.items():
-                        logical = logical_for(system, "duckstation", nplayer, action.lower(), default)
-                        value = duckstation_button(layout, sdl_index, logical)
-                        if value is not None:
-                            pass  # Batocera DuckStation evdev patch owns gun buttons/aim
-                    for key, value in duckstation_relative_axes(
-                        sdl_index,
-                        axis_mode(system, "duckstation", nplayer, "x"),
-                        axis_mode(system, "duckstation", nplayer, "y"),
-                    ).items():
-                        pass  # Batocera DuckStation evdev patch owns gun buttons/aim
 
         for nplayer in range(gun_count + 1, 9):
             pad_num = f"Pad{nplayer}"

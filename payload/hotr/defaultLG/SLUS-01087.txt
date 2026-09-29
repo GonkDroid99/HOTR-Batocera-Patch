@@ -10,12 +10,10 @@ Recoil_Value 0
 :mame_start
 *All
 >Open_COM_NoInit
->Keyboard_Mouse_Mode
 >Open_COM
 :mame_stop
 *All
 >Close_COM_InitOnly
->Keyboard_Mouse_Mode
 >Close_COM_NoInit
 [Signals]
 :GunRecoil_P1

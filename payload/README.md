@@ -4,6 +4,9 @@ Normal Git intentionally excludes the large runtime binaries. The release workfl
 
 - `emulators/duckstation/` from `duckstation-hotr.tar.gz`
 - `emulators/pcsx2/` from `pcsx2-hotr.tar.gz`
-- `hotr/hook-of-the-reaper` from `Hook_of_the_Reaper-x86_64.AppImage`
+- `hotr/HookOfTheReaper-x86-64.AppImage` from the bundled HOTR AppImage
+
+PCSX2 cheat files are bundled under `emulators/pcsx2/cheats/` and seeded into
+`/userdata/cheats/ps2` by the installer without overwriting existing files.
 
 Build the emulator archives with `buildroot/build-emulators.sh`.

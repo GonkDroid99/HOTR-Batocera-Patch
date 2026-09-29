@@ -41,13 +41,6 @@ define HOOK_OF_THE_REAPER_INSTALL_TARGET_CMDS
         $(BR2_EXTERNAL_BATOCERA_PATH)/package/batocera/controllers/guns/hook-of-the-reaper/99-hotr.rules \
         $(TARGET_DIR)/etc/udev/rules.d/99-hotr.rules
 
-    # Override retroshooter-guns' ID_INPUT_JOYSTICK=0 suppression for RS3 guns
-    # in gamepad/SDL mode so DuckStation LightGun Edition can enumerate them via SDL.
-    # Must sort after 99-retroshooter-guns.rules (j > g alphabetically).
-    $(INSTALL) -D -m 0644 \
-        $(BR2_EXTERNAL_BATOCERA_PATH)/package/batocera/controllers/guns/hook-of-the-reaper/99-retroshooter-joystick-override.rules \
-        $(TARGET_DIR)/etc/udev/rules.d/99-retroshooter-joystick-override.rules
-
     # Auto-config script — detects connected guns and writes lightguns.hor/playersAss.hor on boot
     $(INSTALL) -D -m 0755 \
         $(BR2_EXTERNAL_BATOCERA_PATH)/package/batocera/controllers/guns/hook-of-the-reaper/hotr-autoconfig.py \

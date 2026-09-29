@@ -85,14 +85,9 @@ define PCSX2_LIGHTGUN_TEXTURES
 endef
 
 define PCSX2_LIGHTGUN_PATCHES
-    mkdir -p $(TARGET_DIR)/usr/share/batocera/datainit/bios/ps2
+    mkdir -p $(TARGET_DIR)/usr/pcsx2-lightgun/bin/resources
     $(HOST_DIR)/bin/curl -L \
         https://github.com/PCSX2/pcsx2_patches/releases/download/latest/patches.zip -o \
-        $(TARGET_DIR)/usr/share/batocera/datainit/bios/ps2/patches.zip
-    # Keep a copy beside the emulator for older HOTR binaries whose resource
-    # lookup predates the BIOS-folder patch.
-    mkdir -p $(TARGET_DIR)/usr/pcsx2-lightgun/bin/resources
-    cp -p $(TARGET_DIR)/usr/share/batocera/datainit/bios/ps2/patches.zip \
         $(TARGET_DIR)/usr/pcsx2-lightgun/bin/resources/patches.zip
 endef
 

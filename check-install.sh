@@ -18,12 +18,11 @@ check_exec /userdata/system/hotr/emulators/duckstation/MameOutputSender
 check_exec /userdata/system/hotr/emulators/pcsx2/MameOutputSender
 check_exec /userdata/system/hotr/emulators/duckstation/duckstation-lightgun-qt
 check_exec /userdata/system/hotr/emulators/pcsx2/pcsx2-lightgun-qt
-check /userdata/bios/ps2/patches.zip
+check /userdata/system/hotr/emulators/pcsx2/resources/patches.zip
 check "$GENROOT/duckstation_lightgun/duckstationLightgunGenerator.py"
 check "$GENROOT/pcsx2_lightgun/pcsx2LightgunGenerator.py"
 check "$GENROOT/lightgun_rs3.py"
 check /etc/udev/rules.d/99-hotr.rules
-check /etc/udev/rules.d/99-retroshooter-joystick-override.rules
 check /userdata/saves/mame/plugins/stateoutput/plugin.json
 
 if [ -f /userdata/system/hotr/sinden-tcp.enabled ]; then

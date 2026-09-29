@@ -16,16 +16,16 @@ done
 need_exec "$ROOT/payload/emulators/duckstation/MameOutputSender"
 need_exec "$ROOT/payload/emulators/pcsx2/pcsx2-lightgun-qt"
 need_exec "$ROOT/payload/emulators/pcsx2/MameOutputSender"
-[ -s "$ROOT/payload/bios/ps2/patches.zip" ] || {
-  echo "ERROR: PCSX2 patches archive is missing from payload/bios/ps2." >&2
+[ -s "$ROOT/payload/emulators/pcsx2/resources/patches.zip" ] || {
+  echo "ERROR: PCSX2 patches archive is missing from payload/emulators/pcsx2/resources." >&2
   exit 2
 }
-unzip -t "$ROOT/payload/bios/ps2/patches.zip" >/dev/null || {
+unzip -t "$ROOT/payload/emulators/pcsx2/resources/patches.zip" >/dev/null || {
   echo "ERROR: PCSX2 patches archive is invalid." >&2
   exit 2
 }
 HOTR=""
-for candidate in "$ROOT/payload/hotr/hook-of-the-reaper" "$ROOT/payload/hotr/Hook_of_the_Reaper-x86_64.AppImage"; do
+for candidate in "$ROOT/payload/hotr/hook-of-the-reaper" "$ROOT/payload/hotr/HookOfTheReaper-x86-64.AppImage"; do
   if [ -x "$candidate" ]; then HOTR="$candidate"; break; fi
 done
 [ -n "$HOTR" ] || { echo "ERROR: HOTR AppImage is missing from payload/hotr." >&2; exit 2; }

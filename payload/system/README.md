@@ -4,7 +4,6 @@ Active files copied by the installer are:
 
 - `hotr-autoconfig.py`
 - `99-hotr.rules`
-- `99-retroshooter-joystick-override.rules`
 - `hotr-sinden-broker.py` and `hotr-sinden-worker-launch` when the optional
   Sinden HOTR recoil broker is enabled.
 

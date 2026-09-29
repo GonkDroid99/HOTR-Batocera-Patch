@@ -44,27 +44,6 @@ raise SystemExit("No release asset matched: "+rx)
 PY
 }
 
-install_pcsx2_patches(){
-  local tmp; tmp="$(mktemp -d)"
-  mkdir -p /userdata/bios/ps2
-
-  # Prefer the current official release, but retain the bundled archive as an
-  # offline fallback so installation still works without network access.
-  if fetch_latest_asset "PCSX2/pcsx2_patches" '^patches\.zip$' "$tmp/patches.zip" \
-      && unzip -t "$tmp/patches.zip" >/dev/null 2>&1; then
-    install -m 0644 "$tmp/patches.zip" /userdata/bios/ps2/patches.zip
-    msg "Installed current PCSX2 patches from the official release."
-  elif [ -f "$BASE/payload/bios/ps2/patches.zip" ]; then
-    install -m 0644 "$BASE/payload/bios/ps2/patches.zip" /userdata/bios/ps2/patches.zip
-    warn "Could not download current PCSX2 patches; using bundled archive."
-  else
-    warn "PCSX2 patches archive unavailable online and no bundled fallback exists."
-  fi
-  rm -rf "$tmp"
-}
-
-install_pcsx2_patches
-
 configure_sinden_tcp() {
   local answer=""
   case "${HOTR_SINDEN_TCP:-}" in
@@ -138,14 +117,37 @@ install_pcsx2_from_tree(){
   msg "PCSX2 HOTR native Batocera build installed."
 }
 
-install_pcsx2_patch_runtime(){
-  local archive=/userdata/bios/ps2/patches.zip
-  [ -s "$archive" ] || return 0
-  # Keep this beside the emulator as well as in /userdata/bios/ps2. Older
-  # HOTR PCSX2 binaries look in EmuFolders::Resources; newer patched builds
-  # look in EmuFolders::Bios.
-  mkdir -p "$HOTR/emulators/pcsx2/resources"
-  install -m 0644 "$archive" "$HOTR/emulators/pcsx2/resources/patches.zip"
+install_pcsx2_patches(){
+  local tmp archive="" dest="$HOTR/emulators/pcsx2/resources/patches.zip"
+  tmp="$(mktemp -d)"
+  mkdir -p "${dest%/*}"
+
+  # Prefer the current official release, but retain the bundled archive as an
+  # offline fallback. PCSX2 reads this from its resources directory.
+  if fetch_latest_asset "PCSX2/pcsx2_patches" '^patches\.zip$' "$tmp/patches.zip" \
+      && unzip -t "$tmp/patches.zip" >/dev/null 2>&1; then
+    archive="$tmp/patches.zip"
+    msg "Downloaded current PCSX2 patches from the official release."
+  elif [ -f "$BASE/payload/emulators/pcsx2/resources/patches.zip" ]; then
+    archive="$BASE/payload/emulators/pcsx2/resources/patches.zip"
+    warn "Could not download current PCSX2 patches; using bundled archive."
+  else
+    warn "PCSX2 patches archive unavailable online and no bundled fallback exists."
+  fi
+  [ -n "$archive" ] && install -m 0644 "$archive" "$dest"
+  rm -rf "$tmp"
+}
+
+install_pcsx2_cheats(){
+  local src="$HOTR/emulators/pcsx2/cheats"
+  local dest=/userdata/cheats/ps2
+  [ -d "$src" ] || return 0
+  mkdir -p "$dest"
+  # Seed bundled cheats without replacing files the user has edited or added.
+  for cheat in "$src"/*.pnach; do
+    [ -f "$cheat" ] || continue
+    [ -e "$dest/$(basename "$cheat")" ] || cp -a "$cheat" "$dest/"
+  done
 }
 
 install_bundled_emulators(){
@@ -175,7 +177,8 @@ case "$MODE" in
   *) die "Usage: $0 [--auto|--bundled|--github-emulators|--infrastructure-only]" ;;
 esac
 
-install_pcsx2_patch_runtime
+install_pcsx2_patches
+install_pcsx2_cheats
 
  # HOTR AppImage + persistent data. The payload intentionally has no nested
  # data/data directory. Accept both the release asset name and the normalized
@@ -183,7 +186,7 @@ install_pcsx2_patch_runtime
 HOTR_ASSET=""
 for candidate in \
   "$BASE/payload/hotr/hook-of-the-reaper" \
-  "$BASE/payload/hotr/Hook_of_the_Reaper-x86_64.AppImage"; do
+  "$BASE/payload/hotr/HookOfTheReaper-x86-64.AppImage"; do
   if [ -f "$candidate" ]; then HOTR_ASSET="$candidate"; break; fi
 done
 [ -n "$HOTR_ASSET" ] || die "HOTR AppImage missing from release payload."
@@ -258,7 +261,6 @@ IMPORTER="$GENROOT/importer.py"; [ -f "$IMPORTER" ] || die "configgen importer.p
 cp -a "$BASE/payload/configgen/generators/duckstation_lightgun" "$GENROOT/"
 cp -a "$BASE/payload/configgen/generators/pcsx2_lightgun" "$GENROOT/"
 cp -a "$BASE/payload/configgen/generators/lightgun_rs3.py" "$GENROOT/"
-cp -a "$BASE/payload/configgen/generators/hotr_lightgun_mapping.py" "$GENROOT/"
 python3 - "$IMPORTER" <<'PY'
 from pathlib import Path
 import sys
@@ -302,7 +304,6 @@ PY
 
 mkdir -p /etc/udev/rules.d /usr/share/duckstation-lightgun
 cp -a "$BASE/payload/system/99-hotr.rules" /etc/udev/rules.d/99-hotr.rules
-cp -a "$BASE/payload/system/99-retroshooter-joystick-override.rules" /etc/udev/rules.d/99-retroshooter-joystick-override.rules
 rm -rf /usr/share/duckstation-lightgun
 ln -s "$HOTR/emulators/duckstation" /usr/share/duckstation-lightgun
 

@@ -11,8 +11,6 @@ RS3 Gun (USB serial)
     │
     ├─ udev: 99-hotr.rules          → /dev/hotr/rs3reaper-gun1 symlink
     │                                  modprobe option; serial port access
-    └─ udev: 99-retroshooter-joystick-override.rules
-                                    → re-enables ID_INPUT_JOYSTICK=1 for SDL
 
 S35hookofthereaper (boot init)
     └─ hotr-autoconfig.py           → writes lightguns.hor + playersAss.hor
@@ -55,7 +53,6 @@ Builds the HOTR Qt6 binary from local source (`/home/matt/hook-of-the-reaper-src
 | `data/` directory (gun profiles) | `/usr/bin/data/` |
 | `defaultLG/` directory (per-game signal configs) | `/usr/bin/defaultLG/` |
 | `99-hotr.rules` | `/etc/udev/rules.d/` |
-| `99-retroshooter-joystick-override.rules` | `/etc/udev/rules.d/` |
 | `hotr-autoconfig` | `/usr/bin/hotr-autoconfig` |
 | `S35hookofthereaper` | `/etc/init.d/S35hookofthereaper` |
 | `HookOfTheReaper.sh` | `/usr/share/batocera/datainit/roms/ports/HookOfTheReaper.sh` |
@@ -85,20 +82,6 @@ Grants `MODE=0666` to all supported light gun USB devices so HOTR can open them 
 - Creates stable TTY symlinks `/dev/hotr/rs3reaper-gun1` … `rs3reaper-gun4` keyed on the gun serial number embedded in `ID_SERIAL`, matching interface 02 (the data interface).
 
 ---
-
-### `99-retroshooter-joystick-override.rules` — SDL joystick re-enable
-
-```
-SUBSYSTEM=="input", KERNEL=="event*", ACTION=="add",
-ATTRS{name}=="3AGAME 3A-3H Retro Shooter [1-4]",
-ENV{ID_INPUT_JOYSTICK}="1"
-```
-
-!!!!!!!!!
-Maybe change this, we might not need SDL / Releative input if we patch mouse input. Needs investigating
-!!!!!!!!!
-
-**Why this exists:** Batocera's `retroshooter-guns` udev rules set `ID_INPUT_JOYSTICK=0` on all RS3 event nodes so SDL doesn't see duplicate axes (the separate mouse and joystick interfaces from the same gun). When HOTR switches a gun to gamepad/SDL mode (needed for 2-player DuckStation), the joystick interface needs to be visible to SDL. This file sorts alphabetically after `99-retroshooter-guns.rules` (`j > g`) so it wins.
 
 ---
 
@@ -331,7 +314,7 @@ Builds from local source (`/home/matt/pcsx2-lightgun-src` — symlink to the PCS
 | Translations | `/usr/pcsx2-lightgun/bin/translations/` |
 | `MameOutputSender` | `/usr/pcsx2-lightgun/bin/MameOutputSender` + `/usr/bin/MameOutputSender` |
 | PCSX2 texture packs | `/usr/pcsx2-lightgun/bin/resources/textures/` |
-| PS2 game patches zip | `/usr/share/batocera/datainit/bios/ps2/patches.zip` |
+| PS2 game patches zip | `/usr/pcsx2-lightgun/bin/resources/patches.zip` |
 | Crosshair images | `/usr/pcsx2-lightgun/bin/resources/crosshairs/` |
 
 **Build flags:** Uses `clang`; `-DDISABLE_ADVANCE_SIMD=ON` prevents `-march=native` (required for cross-compile); X11/Wayland/OpenGL/Vulkan enabled conditionally based on board config.
