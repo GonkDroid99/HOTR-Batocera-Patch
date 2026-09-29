@@ -106,8 +106,16 @@ fi
 
 TARGET="$BATOCERA_TREE/output/$BATOCERA_TARGET/target"
 DIST="$ROOT/dist/buildroot-binaries"
-rm -rf "$DIST"
 mkdir -p "$DIST"
+
+# Keep the other emulator's existing payload when building only one target.
+# Clear just the selected target so stale files cannot remain inside its archive.
+if [ "$BUILD_EMULATOR" = "both" ] || [ "$BUILD_EMULATOR" = "duckstation" ]; then
+  rm -rf "$DIST/duckstation" "$DIST/duckstation-hotr.tar.gz"
+fi
+if [ "$BUILD_EMULATOR" = "both" ] || [ "$BUILD_EMULATOR" = "pcsx2" ]; then
+  rm -rf "$DIST/pcsx2" "$DIST/pcsx2-hotr.tar.gz"
+fi
 
 # Collect exactly the runtime files the bootstrap installer needs.
 if [ "$BUILD_EMULATOR" = "both" ] || [ "$BUILD_EMULATOR" = "duckstation" ]; then
