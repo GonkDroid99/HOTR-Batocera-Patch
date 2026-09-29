@@ -86,7 +86,7 @@ jobs:
           test -x payload/emulators/pcsx2/MameOutputSender || { echo 'ERROR: PCSX2 MameOutputSender is missing.' >&2; exit 4; }
 
           find payload/emulators -maxdepth 2 -type f -printf '%p %k KB\n' | sort
-          ls -lh payload/hotr/hook-of-the-reaper
+          ls -lh payload/hotr/HookOfTheReaper-x86-64.AppImage
 
       - name: Build self-contained installer ZIP
         shell: bash
