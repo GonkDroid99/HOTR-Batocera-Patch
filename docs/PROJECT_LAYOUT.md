@@ -52,15 +52,3 @@ Runtime configgen paths are discovered from `/usr/lib/python*/site-packages`
 at install/check/uninstall time; the project does not require a fixed Python
 minor version.
 
-## Legacy files
-
-The following are retained as historical references but are not installed by
-the current installer:
-
-- `payload/system/HookOfTheReaper.sh`
-- `payload/system/HookOfTheReaperSetup.sh`
-- `payload/system/HookOfTheReaperRescan.sh`
-- `scripts/ports/HOTR-Setup.sh`
-
-Do not use those scripts for current testing; they reference the old `/usr/bin`
-HOTR layout and predate the managed `/userdata/system/hotr` service.
