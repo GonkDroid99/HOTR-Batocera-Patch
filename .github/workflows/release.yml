@@ -40,7 +40,7 @@ jobs:
             --dir "$RUNNER_TEMP/hotr-binaries" \
             --pattern 'duckstation-hotr.tar.gz' \
             --pattern 'pcsx2-hotr.tar.gz' \
-            --pattern 'HookOfTheReaper-x86-64.AppImage' \
+            --pattern 'HookOfTheReaper-x86_64.AppImage' \
             --pattern 'SHA256SUMS'
           ls -lh "$RUNNER_TEMP/hotr-binaries"
 
@@ -73,8 +73,8 @@ jobs:
           tar -xzf "$RUNNER_TEMP/hotr-binaries/pcsx2-hotr.tar.gz" -C payload/emulators/pcsx2
           test -x payload/emulators/pcsx2/pcsx2-lightgun-qt || { echo "ERROR: PCSX2 archive missing pcsx2-lightgun-qt" >&2; exit 3; }
 
-          install -m 0755 "$RUNNER_TEMP/hotr-binaries/HookOfTheReaper-x86-64.AppImage" \
-            payload/hotr/HookOfTheReaper-x86-64.AppImage
+          install -m 0755 "$RUNNER_TEMP/hotr-binaries/HookOfTheReaper-x86_64.AppImage" \
+            payload/hotr/HookOfTheReaper-x86_64.AppImage
 
           # MameOutputSender belongs beside each emulator.
           test -f payload/emulators/duckstation/MameOutputSender || cp -a reference/bin/duckstation-MameOutputSender payload/emulators/duckstation/MameOutputSender 2>/dev/null || true
@@ -86,7 +86,7 @@ jobs:
           test -x payload/emulators/pcsx2/MameOutputSender || { echo 'ERROR: PCSX2 MameOutputSender is missing.' >&2; exit 4; }
 
           find payload/emulators -maxdepth 2 -type f -printf '%p %k KB\n' | sort
-          ls -lh payload/hotr/HookOfTheReaper-x86-64.AppImage
+          ls -lh payload/hotr/HookOfTheReaper-x86_64.AppImage
 
       - name: Build self-contained installer ZIP
         shell: bash

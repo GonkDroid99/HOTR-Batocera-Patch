@@ -186,7 +186,7 @@ install_pcsx2_cheats
 HOTR_ASSET=""
 for candidate in \
   "$BASE/payload/hotr/hook-of-the-reaper" \
-  "$BASE/payload/hotr/HookOfTheReaper-x86-64.AppImage"; do
+  "$BASE/payload/hotr/HookOfTheReaper-x86_64.AppImage"; do
   if [ -f "$candidate" ]; then HOTR_ASSET="$candidate"; break; fi
 done
 [ -n "$HOTR_ASSET" ] || die "HOTR AppImage missing from release payload."

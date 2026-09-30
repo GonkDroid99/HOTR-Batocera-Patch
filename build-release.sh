@@ -25,7 +25,7 @@ unzip -t "$ROOT/payload/emulators/pcsx2/resources/patches.zip" >/dev/null || {
   exit 2
 }
 HOTR=""
-for candidate in "$ROOT/payload/hotr/hook-of-the-reaper" "$ROOT/payload/hotr/HookOfTheReaper-x86-64.AppImage"; do
+for candidate in "$ROOT/payload/hotr/hook-of-the-reaper" "$ROOT/payload/hotr/HookOfTheReaper-x86_64.AppImage"; do
   if [ -x "$candidate" ]; then HOTR="$candidate"; break; fi
 done
 [ -n "$HOTR" ] || { echo "ERROR: HOTR AppImage is missing from payload/hotr." >&2; exit 2; }
