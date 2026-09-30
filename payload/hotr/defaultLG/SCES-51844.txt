@@ -3,7 +3,7 @@ Players
 P1
 P2
 Recoil & Reload
-Ammo_Value 0
+Ammo_Value 1 Ammo_Value
 Recoil 1
 Recoil_R2S 0
 Recoil_Value 0
@@ -25,3 +25,15 @@ Recoil_Value 0
 #Recoil
 :TriggerPress_P1
 :TriggerPress_P2
+:ReloadPress_P1
+*P1
+#Reload
+:ReloadPress_P2
+*P2
+#Reload
+:P1_Ammo
+*P1
+#Ammo_Value
+:P2_Ammo
+*P2
+#Ammo_Value

@@ -166,11 +166,14 @@ start_hotr() {
 
   cd "$APPDIR" || return 1
   # Batocera's v44 launcher waits for inherited pipes to close. start-stop-
-  # daemon --background closes all inherited descriptors, including extra
-  # descriptors beyond stdin/stdout/stderr that Batocera keeps open.
+  # daemon --background closes inherited descriptors. Launch through sh so it
+  # reopens stdout/stderr in append mode; --output truncates/reuses the start
+  # of the log, which makes tail -F miss Qt's live debug messages.
   if command -v start-stop-daemon >/dev/null 2>&1; then
-    start-stop-daemon --start --background --exec "$DAEMON" --startas "$DAEMON" \
-      --output "$LOGFILE" -- --no-ui
+    rm -f /var/run/hotr-launch.pid
+    start-stop-daemon --start --background --make-pidfile \
+      --pidfile /var/run/hotr-launch.pid --startas /bin/sh -- \
+      -c 'exec "$1" --no-ui >>"$2" 2>&1' sh "$DAEMON" "$LOGFILE"
   elif command -v setsid >/dev/null 2>&1; then
     setsid -f "$DAEMON" --no-ui </dev/null >>"$LOGFILE" 2>&1
   else
