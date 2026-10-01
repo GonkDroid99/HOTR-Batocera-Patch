@@ -27,8 +27,8 @@ autoconfig_summary(){
   local service_log=/userdata/system/logs/hook-of-the-reaper.log
   local raw_path path count=0
 
-  echo 'Recent autoconfiguration messages:'
-  grep -E 'hotr-autoconfig:|HOTR autoconfiguration failed' "$service_log" 2>/dev/null | tail -n 20 || echo '  none found'
+  echo 'Recent hardware-manager messages:'
+  grep -E '\[HOTR\] (New device detected|Device state|Hardware manager matched|Hardware manager registry)' "$service_log" 2>/dev/null | tail -n 20 || echo '  none found'
   echo
   if [ -f "$config" ]; then
     printf 'Configuration timestamp: '
@@ -60,7 +60,9 @@ hotr_pids(){
     pid="${p##*/}"
     line="$(proc_cmdline "$pid")"
     case "$line" in
+      /tmp/.mount_hook-*/usr/bin/HookOfTheReaper\ --headless*|\
       /tmp/.mount_hook-*/usr/bin/HookOfTheReaper\ --no-ui*|\
+      "$ROOT/software/hook-of-the-reaper"\ --headless*|\
       "$ROOT/software/hook-of-the-reaper"\ --no-ui*)
         printf '%s %s\n' "$pid" "$line" ;;
     esac
@@ -99,6 +101,7 @@ collect_report(){
     section 'HOTR configuration'
     cmd sed -n '1,240p' /userdata/system/hook-of-the-reaper/data/lightguns.hor
     cmd sed -n '1,160p' /userdata/system/hook-of-the-reaper/data/playersAss.hor
+    cmd sed -n '1,260p' /userdata/system/hook-of-the-reaper/data/devices.json
     cmd grep -E '^(psx-hotr|ps2-hotr)\.' /userdata/system/batocera.conf
 
     section 'Serial and HID device nodes'

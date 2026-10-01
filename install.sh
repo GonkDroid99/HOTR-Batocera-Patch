@@ -208,16 +208,16 @@ ln -s "$HOTR_DATA/data" "$HOTR/software/hook-of-the-reaper/data"
 ln -s "$HOTR_DATA/defaultLG" "$HOTR/software/hook-of-the-reaper/defaultLG"
 
 # Userdata scripts/config.
-cp -a "$BASE/payload/system/hotr-autoconfig.py" "$HOTR/bin/hotr-autoconfig.py"
 cp -a "$BASE/payload/system/hotr-sinden-broker.py" "$HOTR/bin/hotr-sinden-broker.py"
 cp -a "$BASE/payload/system/hotr-sinden-worker-launch" "$HOTR/bin/hotr-sinden-worker-launch"
 cp -a "$BASE/scripts/hotr-configgen-launch" "$BASE/scripts/add-emulator-config.sh" "$HOTR/bin/"
 cp -a "$BASE/scripts/custom-boot.sh" "$BASE/scripts/custom-stop.sh" "$HOTR/scripts/"
+cp -a "$BASE/scripts/hotr-monitor" "$HOTR/tools/hotr-monitor"
 cp -a "$BASE/scripts/hotr-service" /userdata/system/services/hotr
 cp -a "$BASE/emulationstation/es_systems_hotr.cfg" /userdata/system/configs/emulationstation/es_systems_hotr.cfg
 cp -a "$BASE/emulationstation/pcsx2_legacy_features.xml" "$HOTR/install/pcsx2_legacy_features.xml"
 cp -a "$BASE/scripts/generate-es-features-hotr.py" "$HOTR/bin/generate-es-features-hotr.py"
-chmod +x "$HOTR/bin/generate-es-features-hotr.py"
+chmod +x "$HOTR/bin/generate-es-features-hotr.py" "$HOTR/tools/hotr-monitor"
 "$HOTR/bin/generate-es-features-hotr.py" "$HOTR/install/pcsx2_legacy_features.xml"
 cp -a "$BASE/installer.conf" "$HOTR/install/installer.conf"
 cp -a "$BASE/uninstall.sh" "$BASE/update.sh" "$BASE/check-install.sh" \
@@ -237,9 +237,9 @@ else
   "$HOTR/tools/patch-batocera-sinden-hotr.sh" remove
 fi
 
-cp -a "$BASE/scripts/ports/HookOfTheReaper.sh" "$BASE/scripts/ports/HOTR-Rescan-Guns.sh" \
+cp -a "$BASE/scripts/ports/HookOfTheReaper.sh" \
   "$BASE/scripts/ports/HOTR-Debug-Start.sh" "$BASE/scripts/ports/HOTR-Debug-Finish.sh" /userdata/roms/hotr/
-chmod +x /userdata/roms/hotr/HookOfTheReaper.sh /userdata/roms/hotr/HOTR-Rescan-Guns.sh \
+chmod +x /userdata/roms/hotr/HookOfTheReaper.sh \
   /userdata/roms/hotr/HOTR-Debug-Start.sh /userdata/roms/hotr/HOTR-Debug-Finish.sh
 # These were previously exposed as unrelated Ports entries. Remove only the
 # old HOTR-owned files so an upgrade leaves the normal Ports collection intact.

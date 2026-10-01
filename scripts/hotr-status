@@ -5,6 +5,7 @@ set -u
 ROOT=/userdata/system/hotr
 APP="$ROOT/software/hook-of-the-reaper/hook-of-the-reaper"
 DATA=/userdata/system/hook-of-the-reaper/data
+REGISTRY="$DATA/devices.json"
 HOTR_LOG=/userdata/system/logs/hook-of-the-reaper.log
 SENDER_LOG=/tmp/MameOutputSender.log
 
@@ -14,7 +15,8 @@ value(){ printf '  %-18s %s\n' "$1" "$2"; }
 printf 'HOTR status — %s\n' "$(date '+%Y-%m-%d %H:%M:%S %Z')"
 
 section Service
-app_pids="$(pgrep -f '/tmp/.mount_hook-.*/usr/bin/HookOfTheReaper --no-ui' 2>/dev/null || true)"
+app_pids="$(pgrep -f '/tmp/.mount_hook-.*/usr/bin/HookOfTheReaper --headless' 2>/dev/null || true)"
+[ -n "$app_pids" ] || app_pids="$(pgrep -f '/tmp/.mount_hook-.*/usr/bin/HookOfTheReaper --no-ui' 2>/dev/null || true)"
 if [ -n "$app_pids" ]; then
   value state "running (PID ${app_pids//$'\n'/, })"
 else
@@ -26,7 +28,6 @@ if [ -f "$APP" ]; then
 else
   value app MISSING
 fi
-
 section Guns
 if [ -d /dev/hotr ]; then
   found=0
@@ -46,6 +47,13 @@ if [ -f "$DATA/lightguns.hor" ]; then
 else
   value config MISSING
 fi
+if [ -s "$REGISTRY" ]; then
+  registry_devices="$(grep -c '"identity"' "$REGISTRY" 2>/dev/null || true)"
+  registry_setup="$(grep -c '"state": "NeedsSetup"' "$REGISTRY" 2>/dev/null || true)"
+  value hardware-registry "${registry_devices} device(s), ${registry_setup} needing setup"
+else
+  value hardware-registry unavailable
+fi
 
 section Game/output
 game="$(grep -E '\[HOTR\] GameStart game=' "$HOTR_LOG" 2>/dev/null | tail -n 1 || true)"
@@ -64,6 +72,8 @@ last_open="$(grep -E '\[HOTR\] Serial OPEN' "$HOTR_LOG" 2>/dev/null | tail -n 1 
 last_error="$(grep -E '\[HOTR\] Serial (ERROR|write failed|close drain timed out)' "$HOTR_LOG" 2>/dev/null | tail -n 1 || true)"
 value last-open "${last_open:-none}"
 value last-error "${last_error:-none}"
+last_recovery="$(grep -E '\[HOTR\] (Serial device recovered|Hardware configuration changed)' "$HOTR_LOG" 2>/dev/null | tail -n 1 || true)"
+value last-recovery "${last_recovery:-none}"
 
 section Logs
 value HOTR "$HOTR_LOG"

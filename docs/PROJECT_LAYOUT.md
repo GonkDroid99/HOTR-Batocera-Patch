@@ -12,17 +12,16 @@ payload, and the local Buildroot emulator toolchain.
 | `update.sh` / `uninstall.sh` | Update and removal operations. |
 | `installer.conf` | Emulator source/release settings. |
 | `payload/configgen/generators/` | Separate PCSX2/DuckStation configgen generators. |
-| `payload/system/hotr-autoconfig.py` | Boot/rescan device discovery and HOTR config merge. |
 | `payload/system/99-hotr.rules` | HOTR USB permissions and serial aliases. |
 | `payload/emulators/pcsx2/resources/patches.zip` | PCSX2 game patch archive bundled with the emulator resources. |
 | `scripts/hotr-service` | Background HOTR service. |
+| `scripts/hotr-monitor` | Live service, HardwareManager, and event monitor. |
 | `payload/system/hotr-sinden-broker.py` | Optional HOTR TCP-to-Sinden serial broker and per-gun PTY worker. |
 | `payload/system/hotr-sinden-worker-launch` | Stable per-gun worker/PTY launcher used by Batocera's Sinden helper. |
 | `scripts/patch-batocera-sinden-hotr.sh` | Optional broker hook; restores the stock helper with `remove`. |
 | `scripts/hotr-configgen-launch` | Emulator launcher and temporary PCSX2 fullscreen workaround. |
 | `scripts/patch-batocera-sinden.sh` | Optional Sinden patch: `apply` or `remove`; creates a backup. |
 | `scripts/ports/HookOfTheReaper.sh` | Opens the HOTR configuration UI. |
-| `scripts/ports/HOTR-Rescan-Guns.sh` | Stops, rescans, and restarts HOTR. |
 
 ## Testing
 
@@ -32,7 +31,6 @@ development and regression checks.
 
 | Path | Purpose |
 | --- | --- |
-| `scripts/tests/test-hotr-autoconfig.sh` | Simulated serial and HID discovery/config merge test. |
 | `scripts/tests/test-sinden-pipeline.sh` | Sinden helper/static checks and loopback TCP test. |
 | `scripts/tests/hotr-sinden-broker-selftest.sh` | Hardware-free TCP-to-serial-frame translation test. |
 | `scripts/tests/hotr-sinden-worker-selftest.sh` | Hardware-free end-to-end TCP, worker, fake serial and Mono-PTY test. |
@@ -51,4 +49,3 @@ archives consumed by the release payload.
 Runtime configgen paths are discovered from `/usr/lib/python*/site-packages`
 at install/check/uninstall time; the project does not require a fixed Python
 minor version.
-

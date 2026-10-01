@@ -67,7 +67,6 @@ configurations.
 /userdata/system/services/hotr
 /userdata/saves/mame/plugins/stateoutput/
 /userdata/roms/hotr/HookOfTheReaper.sh
-/userdata/roms/hotr/HOTR-Rescan-Guns.sh
 ```
 
 
@@ -92,4 +91,13 @@ From SSH, the equivalent commands are:
 # launch the failing game, then:
 /userdata/system/hotr/tools/hotr-debug-report.sh finish
 ```
+
+For live HardwareManager and service tracking while testing guns, use:
+
+```sh
+/userdata/system/hotr/tools/hotr-monitor
+```
+
+It reports service transitions, registry changes, and new HOTR device/game
+events. Stop it with Ctrl+C.
 - The small configgen/udev/desktop changes under Batocera's root filesystem are persisted with `batocera-save-overlay`.

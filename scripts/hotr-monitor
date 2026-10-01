@@ -1,0 +1,83 @@
+#!/bin/bash
+# Live HOTR service and HardwareManager monitor for Batocera diagnostics.
+set -u
+
+ROOT=/userdata/system/hotr
+LOG=/userdata/system/logs/hook-of-the-reaper.log
+REGISTRY=/userdata/system/hook-of-the-reaper/data/devices.json
+INTERVAL=1
+ONCE=0
+
+usage(){
+  printf 'Usage: %s [--once] [--interval SECONDS]\n' "$0"
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --once) ONCE=1; shift ;;
+    --interval)
+      [ "$#" -ge 2 ] || { usage >&2; exit 2; }
+      INTERVAL="$2"; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    *) usage >&2; exit 2 ;;
+  esac
+done
+
+timestamp(){ date '+%Y-%m-%dT%H:%M:%S%z'; }
+
+service_pids(){
+  local path pid cmd
+  for path in /proc/[0-9]*; do
+    pid="${path##*/}"
+    [ "$pid" != "$$" ] || continue
+    [ -r "/proc/$pid/cmdline" ] || continue
+    cmd="$(tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null || true)"
+    case "$cmd" in
+      /tmp/.mount_hook-*/usr/bin/HookOfTheReaper\ --headless*|\
+      /tmp/.mount_hook-*/usr/bin/HookOfTheReaper\ --no-ui*|\
+      "$ROOT/software/hook-of-the-reaper"\ --headless*|\
+      "$ROOT/software/hook-of-the-reaper"\ --no-ui*)
+        printf '%s ' "$pid" ;;
+    esac
+  done
+}
+
+registry_summary(){
+  [ -s "$REGISTRY" ] || { printf 'registry=missing'; return; }
+  local states
+  states="$(grep -o '"state"[[:space:]]*:[[:space:]]*"[^"]*"' "$REGISTRY" 2>/dev/null \
+    | sed -E 's/.*"state"[[:space:]]*:[[:space:]]*"([^"]*)"/\1/' \
+    | sort | uniq -c | awk '{$1=$1; print}' | paste -sd, -)"
+  printf 'registry=%s' "${states:-present}"
+}
+
+last_log_line="$(wc -l <"$LOG" 2>/dev/null || printf 0)"
+last_registry_signature=''
+last_service_state=''
+
+while :; do
+  service_pid_list="$(service_pids)"
+  if [ -n "$service_pid_list" ]; then service_state="running($service_pid_list)"; else service_state=stopped; fi
+  registry_signature="$(stat -c '%Y:%s' "$REGISTRY" 2>/dev/null || printf missing)"
+
+  if [ "$ONCE" -eq 1 ] || [ "$service_state" != "$last_service_state" ] || \
+     [ "$registry_signature" != "$last_registry_signature" ]; then
+    printf '[%s] service=%s %s\n' "$(timestamp)" "$service_state" "$(registry_summary)"
+    last_service_state="$service_state"
+    last_registry_signature="$registry_signature"
+  fi
+
+  if [ -f "$LOG" ]; then
+    current_log_lines="$(wc -l <"$LOG" 2>/dev/null || printf 0)"
+    [ "$current_log_lines" -ge "$last_log_line" ] || last_log_line=0
+    if [ "$current_log_lines" -gt "$last_log_line" ]; then
+      sed -n "$((last_log_line + 1)),${current_log_lines}p" "$LOG" \
+        | grep -E '\[HOTR\] (Device state|Hardware manager|New device|Serial device recovered|GameStart|GameStopped)' \
+        | while IFS= read -r line; do printf '[%s] %s\n' "$(timestamp)" "$line"; done || true
+      last_log_line="$current_log_lines"
+    fi
+  fi
+
+  [ "$ONCE" -eq 1 ] && exit 0
+  sleep "$INTERVAL"
+done

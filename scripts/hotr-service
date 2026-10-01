@@ -4,7 +4,6 @@ set -u
 ROOT=/userdata/system/hotr
 APPDIR="$ROOT/software/hook-of-the-reaper"
 DAEMON="$APPDIR/hook-of-the-reaper"
-AUTOCONFIG="$ROOT/bin/hotr-autoconfig.py"
 SINDEN_BROKER="$ROOT/bin/hotr-sinden-broker.py"
 LOGFILE=/userdata/system/logs/hook-of-the-reaper.log
 SINDEN_LOG=/userdata/system/logs/hotr-sinden-broker.log
@@ -14,6 +13,10 @@ SINDEN_CONTROL="$SINDEN_RUN/broker.sock"
 SINDEN_ENABLE_FILE="$ROOT/sinden-tcp.enabled"
 DATADIR=/userdata/system/hook-of-the-reaper/data
 MAX_LOG_BYTES=1048576
+
+# The service is explicitly headless.  The HOTR port launcher stops this
+# service and launches the normal UI with --ui.
+HOTR_UI_ARGS=(--headless)
 
 mkdir -p /userdata/system/logs
 
@@ -43,7 +46,7 @@ hotr_pids() {
     pid="${p##*/}"
     cmd="$(proc_cmdline "$pid")"
     case "$cmd" in
-      /tmp/.mount_hook-*/usr/bin/HookOfTheReaper\ --no-ui*) printf '%s\n' "$pid" ;;
+      /tmp/.mount_hook-*/usr/bin/HookOfTheReaper\ --headless*|/tmp/.mount_hook-*/usr/bin/HookOfTheReaper\ --no-ui*) printf '%s\n' "$pid" ;;
     esac
   done
 }
@@ -54,7 +57,7 @@ hotr_runtime_pids() {
     pid="${p##*/}"
     cmd="$(proc_cmdline "$pid")"
     case "$cmd" in
-      "$DAEMON"\ --no-ui*) printf '%s\n' "$pid" ;;
+      "$DAEMON"\ --headless*|"$DAEMON"\ --no-ui*) printf '%s\n' "$pid" ;;
     esac
   done
 }
@@ -111,43 +114,6 @@ start_hotr() {
 
   rotate_log
   cleanup_stale_qipc
-  scan_status=10
-  scan_attempts=0
-  if [ -x "$AUTOCONFIG" ]; then
-    # USB serial devices and the option driver can appear after the service.
-    # Retry briefly so boot does not permanently capture an empty/stale scan.
-    for attempt in $(seq 1 20); do
-      scan_attempts="$attempt"
-      # The connected-gun set can change between boots, so boot is a forced
-      # full scan rather than a one-time initialization.
-      python3 "$AUTOCONFIG" --force >>"$LOGFILE" 2>&1
-      scan_status=$?
-      case "$scan_status" in
-        0)
-          # The detector has already identified the gun and written the
-          # current ttyUSB/ttyACM path. Do not infer success from a particular
-          # udev symlink being present.
-          break
-          ;;
-        10)
-          # USB enumeration can lag behind the service during boot.
-          sleep 1
-          ;;
-        *)
-          service_log "HOTR autoconfiguration failed with status $scan_status"
-          # A configuration error is not normally fixed by waiting for USB
-          # enumeration; leave the error visible and continue starting HOTR.
-          break
-          ;;
-      esac
-    done
-    case "$scan_status" in
-      0)  service_log "HOTR autoconfiguration complete: guns configured successfully after $scan_attempts attempt(s)" ;;
-      10) service_log "HOTR autoconfiguration complete: no supported guns detected after $scan_attempts attempt(s)" ;;
-      *)  service_log "HOTR autoconfiguration stopped with error status $scan_status after $scan_attempts attempt(s)" ;;
-    esac
-  fi
-
   export DISPLAY=:0
   export HOME=/userdata/system
   export XDG_CONFIG_HOME=/userdata/system/configs
@@ -173,11 +139,11 @@ start_hotr() {
     rm -f /var/run/hotr-launch.pid
     start-stop-daemon --start --background --make-pidfile \
       --pidfile /var/run/hotr-launch.pid --startas /bin/sh -- \
-      -c 'exec "$1" --no-ui >>"$2" 2>&1' sh "$DAEMON" "$LOGFILE"
+      -c 'exec "$1" "$2" >>"$3" 2>&1' sh "$DAEMON" "${HOTR_UI_ARGS[0]}" "$LOGFILE"
   elif command -v setsid >/dev/null 2>&1; then
-    setsid -f "$DAEMON" --no-ui </dev/null >>"$LOGFILE" 2>&1
+    setsid -f "$DAEMON" "${HOTR_UI_ARGS[@]}" </dev/null >>"$LOGFILE" 2>&1
   else
-    nohup "$DAEMON" --no-ui </dev/null >>"$LOGFILE" 2>&1 &
+    nohup "$DAEMON" "${HOTR_UI_ARGS[@]}" </dev/null >>"$LOGFILE" 2>&1 &
   fi
 
   # Detect an immediate AppImage/Qt/startup failure instead of reporting a

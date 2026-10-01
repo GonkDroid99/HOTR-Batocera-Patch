@@ -18,7 +18,7 @@ export HOTR_DATA_DIR=/userdata/system/hook-of-the-reaper/data
 unset XDG_RUNTIME_DIR
 
 cd "$APPDIR" || exit 1
-"$APP" >>"$LOG" 2>&1
+"$APP" --ui >>"$LOG" 2>&1
 rc=$?
 
 # Return to appliance/service mode when the GUI closes.

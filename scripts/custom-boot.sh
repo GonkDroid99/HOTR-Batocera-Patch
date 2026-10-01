@@ -1,4 +1,4 @@
 #!/bin/bash
 # USER CUSTOMISATION POINT: add any extra boot-time gun/light/feedback setup here.
-# The supplied hotr-autoconfig already detects supported guns before this script is needed.
+# Hardware discovery is owned by HOTR's HardwareManager.
 exit 0
