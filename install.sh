@@ -25,7 +25,7 @@ msg "Detected Batocera: ${VER:-unknown}"
 echo "$VER" | grep -Eq '(^|[^0-9])43([.]|[^0-9]|$)' || warn "Designed/tested for Batocera 43/43.1; continuing."
 
 mkdir -p "$HOTR"/{bin,emulators/duckstation,emulators/pcsx2,scripts,software/hook-of-the-reaper,backups,install,tools} \
-         "$HOTR_DATA"/{data,defaultLG} /userdata/system/services /userdata/system/configs/emulationstation /userdata/roms/ports
+         "$HOTR_DATA"/{data,defaultLG} /userdata/system/services /userdata/system/configs/emulationstation /userdata/roms/ports /userdata/roms/hotr
 
 fetch_latest_asset(){
   local repo="$1" regex="$2" out="$3"
@@ -221,7 +221,7 @@ chmod +x "$HOTR/bin/generate-es-features-hotr.py"
 "$HOTR/bin/generate-es-features-hotr.py" "$HOTR/install/pcsx2_legacy_features.xml"
 cp -a "$BASE/installer.conf" "$HOTR/install/installer.conf"
 cp -a "$BASE/uninstall.sh" "$BASE/update.sh" "$BASE/check-install.sh" \
-  "$BASE/scripts/hotr-debug-report.sh" \
+  "$BASE/scripts/hotr-debug-report.sh" "$BASE/scripts/hotr-status" \
   "$BASE/scripts/tests/hotr-sinden-full-selftest.sh" \
   "$BASE/scripts/tests/hotr-sinden-native-helper-selftest.py" \
   "$BASE/scripts/patch-batocera-sinden-hotr.sh" "$HOTR/tools/"
@@ -238,10 +238,35 @@ else
 fi
 
 cp -a "$BASE/scripts/ports/HookOfTheReaper.sh" "$BASE/scripts/ports/HOTR-Rescan-Guns.sh" \
-  "$BASE/scripts/ports/HOTR-Debug-Start.sh" "$BASE/scripts/ports/HOTR-Debug-Finish.sh" /userdata/roms/ports/
-chmod +x /userdata/roms/ports/HookOfTheReaper.sh /userdata/roms/ports/HOTR-Rescan-Guns.sh \
-  /userdata/roms/ports/HOTR-Debug-Start.sh /userdata/roms/ports/HOTR-Debug-Finish.sh
-rm -f /userdata/roms/ports/HOTR-Setup.sh
+  "$BASE/scripts/ports/HOTR-Debug-Start.sh" "$BASE/scripts/ports/HOTR-Debug-Finish.sh" /userdata/roms/hotr/
+chmod +x /userdata/roms/hotr/HookOfTheReaper.sh /userdata/roms/hotr/HOTR-Rescan-Guns.sh \
+  /userdata/roms/hotr/HOTR-Debug-Start.sh /userdata/roms/hotr/HOTR-Debug-Finish.sh
+# These were previously exposed as unrelated Ports entries. Remove only the
+# old HOTR-owned files so an upgrade leaves the normal Ports collection intact.
+rm -f /userdata/roms/ports/HookOfTheReaper.sh /userdata/roms/ports/HOTR-Setup.sh \
+  /userdata/roms/ports/HOTR-Rescan-Guns.sh /userdata/roms/ports/HOTR-Debug-Start.sh \
+  /userdata/roms/ports/HOTR-Debug-Finish.sh
+
+install_hotr_theme_assets(){
+  local theme="" dest asset
+  if [ -r /userdata/system/configs/emulationstation/es_settings.cfg ]; then
+    theme="$(sed -n 's/.*name="ThemeSet" value="\([^"]*\)".*/\1/p' \
+      /userdata/system/configs/emulationstation/es_settings.cfg | head -n1)"
+  fi
+  [ -n "$theme" ] || { warn "Could not determine the active EmulationStation theme; skipping HOTR logos."; return 0; }
+  dest="/userdata/themes/$theme/_inc/logos"
+  if [ ! -d "/userdata/themes/$theme" ]; then
+    warn "Active theme '$theme' is not installed under /userdata/themes; skipping HOTR logos."
+    return 0
+  fi
+  mkdir -p "$dest"
+  for asset in hotr.png hotr-w.png psx-hotr.png ps2-hotr.png; do
+    [ -f "$BASE/payload/hotr/emulationstation/logos/$asset" ] || die "Missing HOTR theme asset: $asset"
+    cp -a "$BASE/payload/hotr/emulationstation/logos/$asset" "$dest/$asset"
+  done
+  msg "Installed HOTR logos into theme '$theme'."
+}
+install_hotr_theme_assets
 
 CONF=/userdata/system/batocera.conf; touch "$CONF"
 set_conf(){ local k="$1" v="$2"; sed -i "/^${k//./\\.}=/d" "$CONF"; printf '%s=%s\n' "$k" "$v" >>"$CONF"; }
@@ -309,7 +334,9 @@ ln -s "$HOTR/emulators/duckstation" /usr/share/duckstation-lightgun
 
 mkdir -p /usr/share/applications /usr/bin
 cp -a "$BASE/scripts/batocera-config-duckstation-hotr" "$BASE/scripts/batocera-config-pcsx2-hotr" "$BASE/scripts/batocera-config-hotr" /usr/bin/
+cp -a "$BASE/scripts/hotr-status" /usr/bin/hotr-status
 chmod +x /usr/bin/batocera-config-*-hotr /usr/bin/batocera-config-hotr
+chmod +x /usr/bin/hotr-status
 cp -a "$BASE/scripts/desktop/"*.desktop /usr/share/applications/
 
 # Native MAME recoil/output support: output network + MSOP stateoutput + matching HOTR profiles.

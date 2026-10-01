@@ -8,6 +8,7 @@ check_exec(){ if [ -x "$1" ]; then echo "[OK] executable $1"; else echo "[MISSIN
 echo "HOTR Batocera 43 installation check"
 check /userdata/system/configs/emulationstation/es_systems_hotr.cfg
 check /userdata/system/configs/emulationstation/es_features_hotr.cfg
+check_exec /userdata/roms/hotr/HookOfTheReaper.sh
 check_exec /userdata/system/services/hotr
 check_exec /userdata/system/hotr/software/hook-of-the-reaper/hook-of-the-reaper
 check_exec /userdata/system/hotr/bin/hotr-configgen-launch

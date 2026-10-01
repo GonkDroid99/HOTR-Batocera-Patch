@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /userdata/roms/ports/HookOfTheReaper.sh
+exec /userdata/roms/hotr/HookOfTheReaper.sh

@@ -66,8 +66,8 @@ configurations.
 
 /userdata/system/services/hotr
 /userdata/saves/mame/plugins/stateoutput/
-/userdata/roms/ports/HookOfTheReaper.sh
-/userdata/roms/ports/HOTR-Rescan-Guns.sh
+/userdata/roms/hotr/HookOfTheReaper.sh
+/userdata/roms/hotr/HOTR-Rescan-Guns.sh
 ```
 
 

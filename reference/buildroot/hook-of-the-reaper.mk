@@ -51,15 +51,15 @@ define HOOK_OF_THE_REAPER_INSTALL_TARGET_CMDS
         $(BR2_EXTERNAL_BATOCERA_PATH)/package/batocera/controllers/guns/hook-of-the-reaper/S35hookofthereaper \
         $(TARGET_DIR)/etc/init.d/S35hookofthereaper
 
-    # ES Ports launchers — copied to /userdata/roms/ports/ on first boot via datainit
+    # HOTR launchers — copied to the dedicated /userdata/roms/hotr/ system on first boot via datainit
     # 1. Hook of the Reaper      — open UI: raises running engine or starts fresh
     $(INSTALL) -D -m 0755 \
         $(BR2_EXTERNAL_BATOCERA_PATH)/package/batocera/controllers/guns/hook-of-the-reaper/HookOfTheReaper.sh \
-        $(TARGET_DIR)/usr/share/batocera/datainit/roms/ports/HookOfTheReaper.sh
+        $(TARGET_DIR)/usr/share/batocera/datainit/roms/hotr/HookOfTheReaper.sh
     # 2. HOTR Rescan Guns        — auto-detect all guns, restart engine silently
     $(INSTALL) -D -m 0755 \
         $(BR2_EXTERNAL_BATOCERA_PATH)/package/batocera/controllers/guns/hook-of-the-reaper/HookOfTheReaperRescan.sh \
-        $(TARGET_DIR)/usr/share/batocera/datainit/roms/ports/HookOfTheReaperRescan.sh
+        $(TARGET_DIR)/usr/share/batocera/datainit/roms/hotr/HookOfTheReaperRescan.sh
 
 endef
 

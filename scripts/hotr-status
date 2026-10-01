@@ -1,0 +1,71 @@
+#!/bin/bash
+# Concise runtime health summary for HOTR Batocera installations.
+set -u
+
+ROOT=/userdata/system/hotr
+APP="$ROOT/software/hook-of-the-reaper/hook-of-the-reaper"
+DATA=/userdata/system/hook-of-the-reaper/data
+HOTR_LOG=/userdata/system/logs/hook-of-the-reaper.log
+SENDER_LOG=/tmp/MameOutputSender.log
+
+section(){ printf '\n%s\n' "$1"; }
+value(){ printf '  %-18s %s\n' "$1" "$2"; }
+
+printf 'HOTR status — %s\n' "$(date '+%Y-%m-%d %H:%M:%S %Z')"
+
+section Service
+app_pids="$(pgrep -f '/tmp/.mount_hook-.*/usr/bin/HookOfTheReaper --no-ui' 2>/dev/null || true)"
+if [ -n "$app_pids" ]; then
+  value state "running (PID ${app_pids//$'\n'/, })"
+else
+  value state stopped
+fi
+if [ -f "$APP" ]; then
+  value app "$APP"
+  value sha256 "$(sha256sum "$APP" | awk '{print $1}')"
+else
+  value app MISSING
+fi
+
+section Guns
+if [ -d /dev/hotr ]; then
+  found=0
+  for gun in /dev/hotr/*; do
+    [ -e "$gun" ] || continue
+    found=1
+    target="$(readlink -f "$gun" 2>/dev/null || true)"
+    owners="$(fuser "$target" 2>/dev/null | xargs 2>/dev/null || true)"
+    value "${gun##*/}" "${target:-missing}${owners:+ (PID $owners)}"
+  done
+  [ "$found" -eq 1 ] || value devices none
+else
+  value devices '/dev/hotr missing'
+fi
+if [ -f "$DATA/lightguns.hor" ]; then
+  value config "$DATA/lightguns.hor"
+else
+  value config MISSING
+fi
+
+section Game/output
+game="$(grep -E '\[HOTR\] GameStart game=' "$HOTR_LOG" 2>/dev/null | tail -n 1 || true)"
+[ -n "$game" ] && value game "${game#*GameStart game= }" || value game none
+bridge="$(pgrep -af MameOutputSender 2>/dev/null | grep -v 'pgrep -af' || true)"
+[ -n "$bridge" ] && value bridge "$bridge" || value bridge stopped
+if [ -f "$SENDER_LOG" ]; then
+  last_output="$(grep -E '→HOTR:' "$SENDER_LOG" 2>/dev/null | tail -n 1 || true)"
+  value last-output "${last_output:-none}"
+else
+  value sender-log missing
+fi
+
+section Serial
+last_open="$(grep -E '\[HOTR\] Serial OPEN' "$HOTR_LOG" 2>/dev/null | tail -n 1 || true)"
+last_error="$(grep -E '\[HOTR\] Serial (ERROR|write failed|close drain timed out)' "$HOTR_LOG" 2>/dev/null | tail -n 1 || true)"
+value last-open "${last_open:-none}"
+value last-error "${last_error:-none}"
+
+section Logs
+value HOTR "$HOTR_LOG"
+value sender "$SENDER_LOG"
+value report "$ROOT/tools/hotr-debug-report.sh start"

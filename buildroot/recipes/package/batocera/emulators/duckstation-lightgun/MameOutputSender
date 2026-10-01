@@ -12,7 +12,7 @@ Hook of the Reaper connects here as a TCP client on port 8000.
 HOTR expects MAME network-output protocol:  "key = value\r\n"
 """
 
-import os, sys, socket, select, time, signal
+import os, sys, socket, select, time, signal, re
 
 PIPE_BASE   = "/tmp/CoreFxPipe_"
 CTRL_PIPE   = PIPE_BASE + "MameHookerProxyControl"
@@ -64,6 +64,7 @@ def main():
     stop_sent = False
     shutdown_requested = False
     ds_ctrl = None   # Unix socket: connection from DuckStation control pipe
+    ctrl_buffer = b""
     ds_guns = [None, None, None, None]  # gun pipe connections
 
     def send_hotr(msg):
@@ -135,6 +136,7 @@ def main():
                         except Exception:
                             pass
                     ds_ctrl = conn
+                    ctrl_buffer = b""
                     log.write("DuckStation control pipe connected\n")
                 except Exception as e:
                     log.write(f"ctrl accept error: {e}\n")
@@ -145,15 +147,30 @@ def main():
                     if not data:
                         log.write("DuckStation control pipe closed\n")
                         ds_ctrl = None
+                        ctrl_buffer = b""
                         send_stop()
                     else:
-                        msg = data.decode(errors="replace").strip()
-                        log.write(f"←DS ctrl: {msg!r}\n")
-                        if msg == "CLOSE":
-                            send_stop()
-                        elif ":" in msg:
-                            key, val = msg.split(":", 1)
-                            send_hotr(f"{key} = {val}")
+                        ctrl_buffer += data
+                        if b"\n" in ctrl_buffer:
+                            frames = ctrl_buffer.split(b"\n")
+                            ctrl_buffer = frames.pop()
+                        else:
+                            legacy = ctrl_buffer.decode(errors="replace").strip()
+                            if re.fullmatch(r"(?:CLOSE|[A-Za-z0-9_]+:-?\d+)", legacy):
+                                frames = [ctrl_buffer]
+                                ctrl_buffer = b""
+                            else:
+                                frames = []
+                        for frame in frames:
+                            msg = frame.decode(errors="replace").strip("\r ")
+                            if not msg:
+                                continue
+                            log.write(f"←DS ctrl: {msg!r}\n")
+                            if msg == "CLOSE":
+                                send_stop()
+                            elif ":" in msg:
+                                key, val = msg.split(":", 1)
+                                send_hotr(f"{key} = {val}")
                 except Exception as e:
                     log.write(f"ctrl read error: {e}\n")
                     ds_ctrl = None
@@ -183,7 +200,9 @@ def main():
                                 ds_guns[i] = None
                             else:
                                 log.write(f"←DS gun {i}: {data!r}\n")
-                                send_hotr(f"{GUN_SIGNALS[i]} = 1")
+                                event_count = len([x for x in data.split(b"\n") if x]) if b"\n" in data else len(data)
+                                for _ in range(event_count):
+                                    send_hotr(f"{GUN_SIGNALS[i]} = 1")
                         except Exception as e:
                             log.write(f"gun {i} read error: {e}\n")
                             ds_guns[i] = None

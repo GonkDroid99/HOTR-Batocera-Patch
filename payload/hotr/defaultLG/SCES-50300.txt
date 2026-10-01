@@ -3,10 +3,14 @@ Players
 P1
 P2
 Recoil & Reload
-Ammo_Value 1 Ammo_Value
-Recoil 1
+Ammo_Value 1 Reload_Value
+Recoil 1 Reload_Value
 Recoil_R2S 0
 Recoil_Value 0
+[Options]
+RS3_Ammo_LED_Map 0:0 1:1 2:2 3:2 4:3 5:3 6:4 7:4 8:5 9:5
+End Options
+[States]
 [States]
 :mame_start
 *All
@@ -14,8 +18,7 @@ Recoil_Value 0
 >Open_COM
 :mame_stop
 *All
->Close_COM_InitOnly
->Close_COM_NoInit
+>Close_COM
 [Signals]
 :GunRecoil_P1
 *P1
@@ -27,10 +30,10 @@ Recoil_Value 0
 :TriggerPress_P2
 :ReloadPress_P1
 *P1
-#Reload
+#Reload_Value
 :ReloadPress_P2
 *P2
-#Reload
+#Reload_Value
 :P1_Ammo
 *P1
 #Ammo_Value

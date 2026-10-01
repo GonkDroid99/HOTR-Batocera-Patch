@@ -22,8 +22,11 @@ fi
 
 rm -f /userdata/system/services/hotr
 rm -f /userdata/system/configs/emulationstation/es_systems_hotr.cfg /userdata/system/configs/emulationstation/es_features_hotr.cfg
-rm -f /userdata/roms/ports/HookOfTheReaper.sh /userdata/roms/ports/HOTR-Setup.sh /userdata/roms/ports/HOTR-Rescan-Guns.sh \
-  /userdata/roms/ports/HOTR-Debug-Start.sh /userdata/roms/ports/HOTR-Debug-Finish.sh
+rm -f /userdata/roms/hotr/HookOfTheReaper.sh /userdata/roms/hotr/HOTR-Rescan-Guns.sh \
+  /userdata/roms/hotr/HOTR-Debug-Start.sh /userdata/roms/hotr/HOTR-Debug-Finish.sh \
+  /userdata/roms/ports/HookOfTheReaper.sh /userdata/roms/ports/HOTR-Setup.sh \
+  /userdata/roms/ports/HOTR-Rescan-Guns.sh /userdata/roms/ports/HOTR-Debug-Start.sh \
+  /userdata/roms/ports/HOTR-Debug-Finish.sh
 
 CONF=/userdata/system/batocera.conf
 [ -f "$CONF" ] && sed -i -E '/^(psx-hotr|ps2-hotr)\./d' "$CONF"
