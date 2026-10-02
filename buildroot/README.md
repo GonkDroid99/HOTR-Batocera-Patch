@@ -20,4 +20,19 @@ Outputs:
 - `dist/buildroot-binaries/duckstation-hotr.tar.gz`
 - `dist/buildroot-binaries/pcsx2-hotr.tar.gz`
 
+The HOTR player-assignment screen is a native EmulationStation settings page,
+not a port or Qt launcher. Build the matching Batocera EmulationStation
+package with:
+
+```sh
+./buildroot/build-emulators.sh --emulationstation
+```
+
+This produces `dist/buildroot-binaries/emulationstation-hotr.tar.gz`. It must
+be built from the same Batocera revision as the target image; the build helper
+selects the Batocera 43 or 44 source patch automatically. The release
+installer only installs the HOTR helper (`/usr/bin/hotr-gun-assignment`), so a
+stock EmulationStation binary remains untouched until the matching native
+package is installed.
+
 Publish those two archives together with the HOTR AppImage using `scripts/publish-binaries-release.sh`.

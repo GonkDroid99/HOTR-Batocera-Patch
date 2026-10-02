@@ -1,0 +1,110 @@
+diff --git a/es-app/src/guis/GuiControllersSettings.cpp b/es-app/src/guis/GuiControllersSettings.cpp
+index e3344420..a9eb848d 100644
+--- a/es-app/src/guis/GuiControllersSettings.cpp
++++ b/es-app/src/guis/GuiControllersSettings.cpp
+@@ -15,9 +15,13 @@
+ #include "InputManager.h"
+ #include "SystemConf.h"
+ #include "ApiSystem.h"
++#include "utils/FileSystemUtil.h"
+ #include "math/Misc.h"
+ 
+ #include <sstream>
++#include <vector>
++#include <cstdio>
++#include <cstdlib>
+ 
+ #define gettext_controllers_settings				_("CONTROLLER SETTINGS")
+ #define gettext_controllers_and_bluetooth_settings  _("CONTROLLER & BLUETOOTH SETTINGS")
+@@ -77,6 +79,14 @@ GuiControllersSettings::GuiControllersSettings(Window* wnd, int autoSel) : GuiSe
+ 			GuiMsgBoxIcon::ICON_INFORMATION));
+ 	});
+ 
++#ifdef BATOCERA
++	// HOTR keeps light-gun routing separately from Batocera's normal controller
++	// priority list. Expose the same native option-list UI without opening the
++	// HOTR Qt application. The helper is optional, so stock ES remains usable.
++	if (Utils::FileSystem::exists("/usr/bin/hotr-gun-assignment"))
++		addEntry(_("HOTR GUN ASSIGNMENT"), true, [window] { openHotrGunAssignments(window); });
++#endif
++
+ 	bool sindenguns_menu = false;
+ 	bool wiiguns_menu = false;
+ 	bool steamdeckguns_menu = false;
+@@ -513,6 +523,64 @@ GuiControllersSettings::GuiControllersSettings(Window* wnd, int autoSel) : GuiSe
+ 	});
+ }
+ 
++void GuiControllersSettings::openHotrGunAssignments(Window* window)
++{
++	struct GunAssignment { int index; int player; std::string label; };
++	std::vector<GunAssignment> guns;
++	std::vector<std::string> gunLines;
++	if (FILE* pipe = popen("/usr/bin/hotr-gun-assignment list", "r"))
++	{
++		char buffer[512];
++		while (fgets(buffer, sizeof(buffer), pipe))
++		{
++			std::string line(buffer);
++			if (!line.empty() && line.back() == '\\n') line.pop_back();
++			gunLines.push_back(line);
++		}
++		pclose(pipe);
++	}
++	for (const auto& line : gunLines)
++	{
++		std::stringstream stream(line);
++		std::string index, player, label;
++		if (!std::getline(stream, index, '\t') || !std::getline(stream, player, '\t') || !std::getline(stream, label))
++			continue;
++		try { guns.push_back({ std::stoi(index), std::stoi(player), label }); }
++		catch (...) { }
++	}
++
++	auto settings = new GuiSettings(window, _("HOTR GUN ASSIGNMENT"));
++	if (guns.empty())
++	{
++		settings->addEntry(_("NO HOTR GUNS DETECTED"), false);
++		window->pushGui(settings);
++		return;
++	}
++
++	for (int player = 1; player <= static_cast<int>(guns.size()); player++)
++	{
++		auto choices = std::make_shared<OptionListComponent<int>>(window,
++			Utils::String::format(_("P%i'S GUN").c_str(), player), false);
++		for (const auto& gun : guns)
++			choices->add(gun.label, gun.index, gun.player == player);
++		if (!choices->hasSelection())
++			choices->selectFirstItem();
++		settings->addWithLabel(Utils::String::format(_("P%i'S GUN").c_str(), player), choices);
++		choices->setSelectedChangedCallback([window, settings, player](const int& gun)
++		{
++			std::string command = "/usr/bin/hotr-gun-assignment assign " + std::to_string(player) + " " + std::to_string(gun);
++			if (std::system(command.c_str()) != 0)
++			{
++				window->pushGui(new GuiMsgBox(window, _("COULD NOT SAVE HOTR GUN ASSIGNMENT.")));
++				return;
++			}
++			delete settings;
++			openHotrGunAssignments(window);
++		});
++	}
++	window->pushGui(settings);
++}
++
+ void GuiControllersSettings::openControllersHotkeys()
+ {
+ 	GuiSettings* s = new GuiSettings(mWindow, _("JOYSTICKS HOTKEYS"));
+diff --git a/es-app/src/guis/GuiControllersSettings.h b/es-app/src/guis/GuiControllersSettings.h
+index 02bf59f2..76d1b174 100644
+--- a/es-app/src/guis/GuiControllersSettings.h
++++ b/es-app/src/guis/GuiControllersSettings.h
+@@ -25,6 +25,7 @@ class GuiControllersSettings : public GuiSettings
+ public:
+ 	static std::string getControllersSettingsLabel();
+ 	static void openControllersSettings(Window* wnd, int autoSel = 0);
++	static void openHotrGunAssignments(Window* wnd);
+ 	
+ 	GuiControllersSettings(Window* wnd, int autosel = 0);
+ 	~GuiControllersSettings();

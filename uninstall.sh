@@ -20,6 +20,12 @@ if [ -x "$BASE/scripts/patch-batocera-sinden.sh" ]; then
   "$BASE/scripts/patch-batocera-sinden.sh" remove 2>/dev/null || true
 fi
 
+# Remove the small conditional logo include and generated branded images from
+# installed themes before deleting the HOTR tools.
+if [ -x "$HOTR/bin/hotr-theme-sync" ]; then
+  "$HOTR/bin/hotr-theme-sync" --remove 2>/dev/null || true
+fi
+
 rm -f /userdata/system/services/hotr
 rm -f /userdata/system/configs/emulationstation/es_systems_hotr.cfg /userdata/system/configs/emulationstation/es_features_hotr.cfg
 rm -f /userdata/roms/hotr/HookOfTheReaper.sh /userdata/roms/hotr/HOTR-Rescan-Guns.sh \
@@ -39,7 +45,13 @@ fi
 
 rm -rf /userdata/saves/mame/plugins/stateoutput
 rm -f /etc/udev/rules.d/99-hotr.rules /etc/udev/rules.d/99-retroshooter-joystick-override.rules
-rm -f /usr/bin/batocera-config-duckstation-hotr /usr/bin/batocera-config-pcsx2-hotr /usr/bin/batocera-config-hotr
+rm -f /usr/bin/batocera-config-duckstation-hotr /usr/bin/batocera-config-pcsx2-hotr /usr/bin/batocera-config-hotr /usr/bin/hotr-gun-assignment
+if [ -e "$HOTR/backups/emulationstation-standalone.original" ]; then
+  install -m 0755 "$HOTR/backups/emulationstation-standalone.original" /usr/bin/emulationstation-standalone
+fi
+if [ -e "$HOTR/backups/emulationstation.original" ]; then
+  install -m 0755 "$HOTR/backups/emulationstation.original" /usr/bin/emulationstation
+fi
 rm -f /usr/share/applications/duckstation-hotr-config.desktop /usr/share/applications/pcsx2-hotr-config.desktop /usr/share/applications/hotr-config.desktop
 rm -f /usr/share/duckstation-lightgun
 rm -f "$HOTR/sinden-tcp.enabled"

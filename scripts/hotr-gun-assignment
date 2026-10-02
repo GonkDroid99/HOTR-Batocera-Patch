@@ -1,0 +1,129 @@
+#!/usr/bin/env python3
+"""Small, stable command interface for the native EmulationStation HOTR menu.
+
+The HOTR application owns the .hor files.  This helper deliberately exposes
+only a tab-separated list and an atomic assignment operation so the
+EmulationStation patch does not need to know HOTR's file format.
+"""
+from __future__ import annotations
+
+import os
+import re
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+DATA = Path(os.environ.get("HOTR_DATA_DIR", "/userdata/system/hook-of-the-reaper/data"))
+GUNS = DATA / "lightguns.hor"
+ASSIGNMENTS = DATA / "playersAss.hor"
+SERVICE = Path("/userdata/system/services/hotr")
+
+
+def read_guns():
+    if not GUNS.is_file():
+        return []
+    lines = GUNS.read_text(errors="replace").splitlines()
+    guns = []
+    for pos, line in enumerate(lines):
+        match = re.fullmatch(r"Light Gun #(\d+)", line.strip())
+        if not match:
+            continue
+        index = int(match.group(1))
+        end = next((i for i in range(pos + 1, len(lines))
+                    if lines[i].strip() == "END_GENERAL_SETTINGS"), None)
+        if end is None:
+            continue
+        # After the general settings, HOTR stores the gun type followed by
+        # its device path/endpoint.  Some profiles use a TCP endpoint instead
+        # of a filesystem path, so only /dev paths are tested for presence.
+        endpoint = lines[end + 2].strip() if end + 2 < len(lines) else ""
+        active = not endpoint.startswith("/dev/") or Path(endpoint).exists()
+        label = endpoint or f"Gun {index + 1}"
+        if endpoint.startswith("/dev/"):
+            label = os.path.basename(endpoint)
+        guns.append((index, label, active))
+    return [gun for gun in guns if gun[2]]
+
+
+def read_assignments():
+    if not ASSIGNMENTS.is_file():
+        return []
+    values = []
+    for line in ASSIGNMENTS.read_text(errors="replace").splitlines()[1:]:
+        if line.strip() == "END_OF_FILE":
+            break
+        try:
+            values.append(int(line.strip()))
+        except ValueError:
+            continue
+    return values
+
+
+def list_guns():
+    assignments = read_assignments()
+    for index, label, _active in read_guns():
+        player = assignments.index(index) + 1 if index in assignments else 0
+        # Label is sourced from udev/HOTR and must not contain tabs/newlines.
+        label = label.replace("\t", " ").replace("\n", " ")
+        print(f"{index}\t{player}\t{label}")
+
+
+def save_assignments(values):
+    if not ASSIGNMENTS.is_file():
+        raise RuntimeError("HOTR player-assignment file is missing")
+    original = ASSIGNMENTS.read_text(errors="replace").splitlines()
+    header = original[0] if original else "Player Assignments"
+    trailer = "END_OF_FILE"
+    count = max(len(values), 8)
+    output = [header] + [str(values[i]) if i < len(values) else "69" for i in range(count)] + [trailer, ""]
+    ASSIGNMENTS.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix="playersAss.", dir=ASSIGNMENTS.parent)
+    try:
+        with os.fdopen(fd, "w") as stream:
+            stream.write("\n".join(output))
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, ASSIGNMENTS)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def assign(player, gun):
+    if player < 1 or gun < 0:
+        raise RuntimeError("invalid player or gun")
+    active = {index for index, _label, _active in read_guns()}
+    if gun not in active:
+        raise RuntimeError("gun is not connected")
+    values = read_assignments()
+    while len(values) < 8:
+        values.append(69)
+    old = values[player - 1] if player - 1 < len(values) else 69
+    other = next((i for i, value in enumerate(values) if value == gun and i != player - 1), None)
+    values[player - 1] = gun
+    if other is not None:
+        values[other] = old
+    save_assignments(values)
+    if SERVICE.is_file() and os.access(SERVICE, os.X_OK):
+        subprocess.run([str(SERVICE), "restart"], stdin=subprocess.DEVNULL,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                       check=False)
+
+
+def main(argv):
+    if len(argv) == 2 and argv[1] == "list":
+        list_guns()
+        return 0
+    if len(argv) == 4 and argv[1] == "assign":
+        assign(int(argv[2]), int(argv[3]))
+        return 0
+    print(f"usage: {argv[0]} list | assign PLAYER GUN", file=sys.stderr)
+    return 2
+
+
+try:
+    raise SystemExit(main(sys.argv))
+except (OSError, ValueError, RuntimeError) as error:
+    print(f"hotr-gun-assignment: {error}", file=sys.stderr)
+    raise SystemExit(1)

@@ -1,50 +1,88 @@
 #!/bin/bash
-# Give the HOTR systems the same theme resources as their PSX/PS2 parents.
+# Keep HOTR systems visually identical to normal PSX/PS2 systems.  Only their
+# carousel identity changes: EmulationStation falls back to the system's full
+# name as text instead of trying to adapt an image to every possible theme.
 set -euo pipefail
 
-ROOT="${HOTR_ROOT:-/userdata/system/hotr}"
 THEMES="${HOTR_THEME_ROOT:-/userdata/themes}"
 SETTINGS="${HOTR_ES_SETTINGS:-/userdata/system/configs/emulationstation/es_settings.cfg}"
-ASSETS="$ROOT/emulationstation/logos"
 
 active_theme() {
   [ -r "$SETTINGS" ] || return 0
   sed -n 's/.*name="ThemeSet" value="\([^"]*\)".*/\1/p' "$SETTINGS" | head -n1
 }
 
-alias_path() {
-  local source="$1" target="$2" path dir name suffix destination
-  while IFS= read -r -d '' path; do
-    dir="${path%/*}"
-    name="${path##*/}"
-    case "$name" in
-      "$source"|"$source"-*|"$source"_*|"$source".*) ;;
-      *) continue ;;
-    esac
-    suffix="${name#"$source"}"
-    destination="$dir/$target$suffix"
-    [ -e "$destination" ] || [ -L "$destination" ] || ln -s "$name" "$destination"
-  done < <(find -P "$3" -depth \( -type f -o -type d \) -print0)
+write_override() {
+  local theme="$1"
+  mkdir -p "$theme/_hotr"
+
+  # These old generated images are deliberately no longer used.
+  rm -f "$theme/_hotr/psx.png" "$theme/_hotr/ps2.png"
+
+  cat >"$theme/_hotr/theme.xml" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<theme>
+  <formatVersion>7</formatVersion>
+  <view name="system">
+    <!-- A missing image intentionally triggers the carousel's fullname text
+         fallback while every other PSX/PS2 theme property remains unchanged. -->
+    <image name="logo" if="${system.name} == 'psx-hotr' || ${system.name} == 'ps2-hotr'">
+      <path>${themePath}/_hotr/use-system-fullname-text</path>
+    </image>
+  </view>
+</theme>
+EOF
 }
 
-copy_logos() {
-  local theme="$1" logo_dir asset
-  [ -d "$ASSETS" ] || return 0
-  logo_dir="$theme/_inc/logos"
-  [ -d "$logo_dir" ] || return 0
-  for asset in hotr.png hotr-w.png psx-hotr.png ps2-hotr.png; do
-    [ -f "$ASSETS/$asset" ] && cp -a "$ASSETS/$asset" "$logo_dir/$asset"
-  done
+inject_override() {
+  local theme="$1" source temporary
+  source="$theme/theme.xml"
+  [ -f "$source" ] || return 0
+  temporary="$(mktemp)"
+
+  awk '
+    /<!-- HOTR LOGO OVERRIDE BEGIN -->/ { skip = 1; next }
+    /<!-- HOTR LOGO OVERRIDE END -->/   { skip = 0; next }
+    !skip {
+      if (!inserted && $0 ~ /^[[:space:]]*<\/theme>[[:space:]]*$/) {
+        print "  <!-- HOTR LOGO OVERRIDE BEGIN -->"
+        print "  <include>./_hotr/theme.xml</include>"
+        print "  <!-- HOTR LOGO OVERRIDE END -->"
+        inserted = 1
+      }
+      print
+    }
+  ' "$source" >"$temporary"
+
+  if ! grep -q 'HOTR LOGO OVERRIDE BEGIN' "$temporary"; then
+    rm -f "$temporary"
+    echo "HOTR: unable to inject text-logo override into $source" >&2
+    return 1
+  fi
+  cat "$temporary" >"$source"
+  rm -f "$temporary"
 }
 
 sync_theme() {
   local theme="$1"
-  [ -d "$theme" ] || return 0
-  # Keep our supplied logos as real files. alias_path() intentionally never
-  # replaces an existing destination, so these override generic PSX/PS2 art.
-  copy_logos "$theme"
-  alias_path psx psx-hotr "$theme"
-  alias_path ps2 ps2-hotr "$theme"
+  [ -f "$theme/theme.xml" ] || return 0
+  write_override "$theme"
+  inject_override "$theme"
+}
+
+remove_override() {
+  local theme="$1" source temporary
+  source="$theme/theme.xml"
+  [ -f "$source" ] || return 0
+  temporary="$(mktemp)"
+  awk '
+    /<!-- HOTR LOGO OVERRIDE BEGIN -->/ { skip = 1; next }
+    /<!-- HOTR LOGO OVERRIDE END -->/   { skip = 0; next }
+    !skip { print }
+  ' "$source" >"$temporary"
+  cat "$temporary" >"$source"
+  rm -f "$temporary"
+  rm -rf "$theme/_hotr"
 }
 
 case "${1:---all}" in
@@ -57,8 +95,13 @@ case "${1:---all}" in
       [ -d "$theme" ] && sync_theme "$theme"
     done
     ;;
+  --remove)
+    for theme in "$THEMES"/*; do
+      [ -d "$theme" ] && remove_override "$theme"
+    done
+    ;;
   *)
-    echo "Usage: $0 [--active|--all]" >&2
+    echo "Usage: $0 [--active|--all|--remove]" >&2
     exit 2
     ;;
 esac

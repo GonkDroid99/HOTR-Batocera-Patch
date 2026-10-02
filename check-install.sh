@@ -17,6 +17,7 @@ check_exec /userdata/system/hotr/bin/hotr-sinden-worker-launch
 check_exec /userdata/system/hotr/tools/hotr-debug-report.sh
 check_exec /userdata/system/hotr/tools/hotr-monitor
 check_exec /userdata/system/hotr/bin/hotr-theme-sync
+check_exec /usr/bin/hotr-gun-assignment
 check_exec /userdata/system/hotr/emulators/duckstation/MameOutputSender
 check_exec /userdata/system/hotr/emulators/pcsx2/MameOutputSender
 check_exec /userdata/system/hotr/emulators/duckstation/duckstation-lightgun-qt

@@ -7,7 +7,7 @@ CONF="${HOTR_BUILD_CONF:-$HERE/buildroot.conf}"
 BUILD_EMULATOR="both"
 usage(){
   cat <<EOF
-Usage: $0 [--pcsx2|--duckstation|--both|--emulator NAME]
+Usage: $0 [--pcsx2|--duckstation|--emulationstation|--both|--emulator NAME]
 
 Build one emulator or both (default).
 EOF
@@ -17,6 +17,7 @@ while [ "$#" -gt 0 ]; do
   case "$1" in
     --pcsx2) BUILD_EMULATOR="pcsx2"; shift ;;
     --duckstation) BUILD_EMULATOR="duckstation"; shift ;;
+    --emulationstation) BUILD_EMULATOR="emulationstation"; shift ;;
     --both) BUILD_EMULATOR="both"; shift ;;
     --emulator)
       [ "$#" -ge 2 ] || { echo "ERROR: --emulator needs pcsx2, duckstation, or both." >&2; usage >&2; exit 2; }
@@ -29,7 +30,7 @@ while [ "$#" -gt 0 ]; do
 done
 
 case "$BUILD_EMULATOR" in
-  pcsx2|duckstation|both) ;;
+  pcsx2|duckstation|emulationstation|both) ;;
   *) echo "ERROR: emulator must be pcsx2, duckstation, or both: $BUILD_EMULATOR" >&2; exit 2 ;;
 esac
 
@@ -80,6 +81,18 @@ if [ "$BUILD_EMULATOR" = "both" ] || [ "$BUILD_EMULATOR" = "pcsx2" ]; then
   rsync -a --delete "$HERE/recipes/package/batocera/emulators/pcsx2-lightgun/" "$BATOCERA_TREE/package/batocera/emulators/pcsx2-lightgun/"
 fi
 rsync -a --delete "$HERE/recipes/package/batocera/libraries/rapidyaml/" "$BATOCERA_TREE/package/batocera/libraries/rapidyaml/"
+if [ "$BUILD_EMULATOR" = "emulationstation" ]; then
+  ES_RECIPE="$BATOCERA_TREE/package/batocera/emulationstation/batocera-emulationstation"
+  mkdir -p "$ES_RECIPE"
+  rm -f "$ES_RECIPE/004-hotr-gun-assignment.patch" "$ES_RECIPE/004-hotr-gun-assignment-v43.patch"
+  ES_VERSION="$(sed -n 's/^BATOCERA_EMULATIONSTATION_VERSION = //p' "$ES_RECIPE/batocera-emulationstation.mk")"
+  case "$ES_VERSION" in
+    ddc8255253252b7400d4c1dc0a313fe604f38f05)
+      cp -a "$HERE/recipes/package/batocera/emulationstation/004-hotr-gun-assignment.patch" "$ES_RECIPE/" ;;
+    *)
+      cp -a "$HERE/recipes/package/batocera/emulationstation/004-hotr-gun-assignment-v43.patch" "$ES_RECIPE/004-hotr-gun-assignment.patch" ;;
+  esac
+fi
 
 # Buildroot external packages are picked up from their .mk files. Batocera's
 # top-level Makefile exposes <target>-pkg specifically for individual packages.
@@ -93,6 +106,9 @@ fi
 if [ "$BUILD_EMULATOR" = "both" ] || [ "$BUILD_EMULATOR" = "pcsx2" ]; then
   rm -rf "$BATOCERA_TREE/output/$BATOCERA_TARGET/build/pcsx2-lightgun-"*
 fi
+if [ "$BUILD_EMULATOR" = "emulationstation" ]; then
+  rm -rf "$BATOCERA_TREE/output/$BATOCERA_TARGET/build/batocera-emulationstation-"*
+fi
 
 if [ "$BUILD_EMULATOR" = "both" ] || [ "$BUILD_EMULATOR" = "pcsx2" ]; then
   echo "=== Building PCSX2 LightGun for $BATOCERA_TARGET ==="
@@ -102,11 +118,27 @@ if [ "$BUILD_EMULATOR" = "both" ] || [ "$BUILD_EMULATOR" = "duckstation" ]; then
   echo "=== Building DuckStation LightGun for $BATOCERA_TARGET ==="
   make "${BATOCERA_TARGET}-pkg" PKG=duckstation-lightgun
 fi
+if [ "$BUILD_EMULATOR" = "emulationstation" ]; then
+  echo "=== Building native EmulationStation with HOTR gun assignment menu for $BATOCERA_TARGET ==="
+  make "${BATOCERA_TARGET}-pkg" PKG=batocera-emulationstation
+fi
 
 
 TARGET="$BATOCERA_TREE/output/$BATOCERA_TARGET/target"
 DIST="$ROOT/dist/buildroot-binaries"
 mkdir -p "$DIST"
+
+if [ "$BUILD_EMULATOR" = "emulationstation" ]; then
+  rm -rf "$DIST/emulationstation" "$DIST/emulationstation-hotr.tar.gz"
+  mkdir -p "$DIST/emulationstation"
+  install -m 0755 "$TARGET/usr/bin/emulationstation" "$DIST/emulationstation/emulationstation"
+  install -m 0755 "$TARGET/usr/bin/emulationstation-standalone" "$DIST/emulationstation/emulationstation-standalone"
+  tar -C "$DIST/emulationstation" -czf "$DIST/emulationstation-hotr.tar.gz" .
+  sha256sum "$DIST/emulationstation-hotr.tar.gz" > "$DIST/emulationstation-SHA256SUMS"
+  echo "Built native EmulationStation runtime payload:"
+  ls -lh "$DIST/emulationstation-hotr.tar.gz"
+  exit 0
+fi
 
 # Keep the other emulator's existing payload when building only one target.
 # Clear just the selected target so stale files cannot remain inside its archive.
