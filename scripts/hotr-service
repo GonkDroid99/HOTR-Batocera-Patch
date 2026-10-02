@@ -34,8 +34,9 @@ rotate_log() {
 }
 
 proc_cmdline() {
-  [ -r "/proc/$1/cmdline" ] || return 0
-  tr '\0' ' ' < "/proc/$1/cmdline" 2>/dev/null || true
+  # Processes can exit between the directory scan and this read. Use cat so
+  # a disappearing /proc entry cannot produce a shell redirection warning.
+  cat "/proc/$1/cmdline" 2>/dev/null | tr '\0' ' ' 2>/dev/null || true
 }
 
 # An AppImage launch has two processes. Only the mounted payload is the HOTR

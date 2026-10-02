@@ -125,11 +125,16 @@ def assign_batch(pairs):
     assigned = [gun for gun in requested.values() if gun != 69]
     if len(assigned) != len(set(assigned)):
         raise RuntimeError("a gun cannot be assigned to more than one player")
+    # Clear the selected player slots first, then clear any stale duplicate
+    # references before placing each requested gun. This also makes choosing
+    # UNASSIGNED (69) remove the gun from that player without leaving it on a
+    # hidden player slot.
+    for player in requested:
+        values[player] = 69
     for player, gun in requested.items():
-        for index, value in enumerate(values):
-            if index != player and value == gun:
-                values[index] = values[player]
-        values[player] = gun
+        if gun != 69:
+            values = [69 if value == gun else value for value in values]
+            values[player] = gun
     save_assignments(values)
     if SERVICE.is_file() and os.access(SERVICE, os.X_OK):
         subprocess.run([str(SERVICE), "restart"], stdin=subprocess.DEVNULL,
