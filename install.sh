@@ -238,7 +238,9 @@ chmod +x "$HOTR/bin/generate-es-features-hotr.py" "$HOTR/bin/hotr-theme-sync" "$
 
 # Batocera 44 discovers emulators through package entry points. Register the
 # HOTR DuckStation launcher separately so normal PSX remains stock.
-BATO_LAUNCH_ROOT="$(printf '%s\n' /usr/lib/python*/site-packages/batocera_launch | sort -V | while read -r candidate; do [ -d "$candidate" ] && printf '%s\n' "$candidate"; done | tail -n1)"
+# An empty result is expected on Batocera 43. Do not let pipefail turn that
+# normal absence of the Batocera 44 launcher into an installer failure.
+BATO_LAUNCH_ROOT="$(printf '%s\n' /usr/lib/python*/site-packages/batocera_launch | sort -V | while read -r candidate; do [ -d "$candidate" ] && printf '%s\n' "$candidate"; done | tail -n1 || true)"
 if [ -n "$BATO_LAUNCH_ROOT" ]; then
   BATO_SITE="${BATO_LAUNCH_ROOT%/batocera_launch}"
   BATO_ENTRY="$BATO_SITE/batocera_launch-44.0.dist-info/entry_points.txt"

@@ -27,7 +27,8 @@ LAUNCHER=(python3 -m configgen.emulatorlauncher)
 # running through the legacy configgen importer, so only use batocera-launch
 # when both custom launchers are installed. Otherwise use the compatibility
 # launcher, which invokes the HOTR generators directly.
-BATO_LAUNCH_ROOT="$(printf '%s\n' /usr/lib/python*/site-packages/batocera_launch | sort -V | while read -r candidate; do [ -d "$candidate" ] && printf '%s\n' "$candidate"; done | tail -n1)"
+# An empty lookup is expected on Batocera 43, where configgen is the launcher.
+BATO_LAUNCH_ROOT="$(printf '%s\n' /usr/lib/python*/site-packages/batocera_launch | sort -V | while read -r candidate; do [ -d "$candidate" ] && printf '%s\n' "$candidate"; done | tail -n1 || true)"
 if command -v batocera-launch >/dev/null 2>&1 && \
    [ -f "$BATO_LAUNCH_ROOT/emulators/duckstation_lightgun.py" ] && \
    [ -f "$BATO_LAUNCH_ROOT/emulators/pcsx2_lightgun.py" ]; then
