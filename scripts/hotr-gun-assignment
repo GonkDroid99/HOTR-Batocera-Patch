@@ -119,8 +119,12 @@ def assign_batch(pairs):
     requested = {}
     for player, gun in pairs:
         if player < 1 or gun not in active:
-            raise RuntimeError("gun is not connected")
+            if gun != 69:
+                raise RuntimeError("gun is not connected")
         requested[player - 1] = gun
+    assigned = [gun for gun in requested.values() if gun != 69]
+    if len(assigned) != len(set(assigned)):
+        raise RuntimeError("a gun cannot be assigned to more than one player")
     for player, gun in requested.items():
         for index, value in enumerate(values):
             if index != player and value == gun:
