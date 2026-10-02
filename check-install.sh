@@ -16,6 +16,7 @@ check_exec /userdata/system/hotr/bin/hotr-sinden-broker.py
 check_exec /userdata/system/hotr/bin/hotr-sinden-worker-launch
 check_exec /userdata/system/hotr/tools/hotr-debug-report.sh
 check_exec /userdata/system/hotr/tools/hotr-monitor
+check_exec /userdata/system/hotr/bin/hotr-theme-sync
 check_exec /userdata/system/hotr/emulators/duckstation/MameOutputSender
 check_exec /userdata/system/hotr/emulators/pcsx2/MameOutputSender
 check_exec /userdata/system/hotr/emulators/duckstation/duckstation-lightgun-qt
@@ -23,7 +24,6 @@ check_exec /userdata/system/hotr/emulators/pcsx2/pcsx2-lightgun-qt
 check /userdata/system/hotr/emulators/pcsx2/resources/patches.zip
 check "$GENROOT/duckstation_lightgun/duckstationLightgunGenerator.py"
 check "$GENROOT/pcsx2_lightgun/pcsx2LightgunGenerator.py"
-check "$GENROOT/lightgun_rs3.py"
 check /etc/udev/rules.d/99-hotr.rules
 check /userdata/saves/mame/plugins/stateoutput/plugin.json
 

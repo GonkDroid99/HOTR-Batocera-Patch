@@ -210,15 +210,32 @@ ln -s "$HOTR_DATA/defaultLG" "$HOTR/software/hook-of-the-reaper/defaultLG"
 # Userdata scripts/config.
 cp -a "$BASE/payload/system/hotr-sinden-broker.py" "$HOTR/bin/hotr-sinden-broker.py"
 cp -a "$BASE/payload/system/hotr-sinden-worker-launch" "$HOTR/bin/hotr-sinden-worker-launch"
-cp -a "$BASE/scripts/hotr-configgen-launch" "$BASE/scripts/add-emulator-config.sh" "$HOTR/bin/"
+cp -a "$BASE/scripts/hotr-configgen-launch" "$BASE/scripts/add-emulator-config.sh" \
+  "$BASE/scripts/hotr-theme-sync" "$HOTR/bin/"
+cp -a "$BASE/payload/hotr/emulationstation" "$HOTR/"
 cp -a "$BASE/scripts/custom-boot.sh" "$BASE/scripts/custom-stop.sh" "$HOTR/scripts/"
 cp -a "$BASE/scripts/hotr-monitor" "$HOTR/tools/hotr-monitor"
 cp -a "$BASE/scripts/hotr-service" /userdata/system/services/hotr
 cp -a "$BASE/emulationstation/es_systems_hotr.cfg" /userdata/system/configs/emulationstation/es_systems_hotr.cfg
 cp -a "$BASE/emulationstation/pcsx2_legacy_features.xml" "$HOTR/install/pcsx2_legacy_features.xml"
 cp -a "$BASE/scripts/generate-es-features-hotr.py" "$HOTR/bin/generate-es-features-hotr.py"
-chmod +x "$HOTR/bin/generate-es-features-hotr.py" "$HOTR/tools/hotr-monitor"
+chmod +x "$HOTR/bin/generate-es-features-hotr.py" "$HOTR/bin/hotr-theme-sync" "$HOTR/tools/hotr-monitor"
 "$HOTR/bin/generate-es-features-hotr.py" "$HOTR/install/pcsx2_legacy_features.xml"
+
+# Batocera 44 discovers emulators through package entry points. Register the
+# HOTR DuckStation launcher separately so normal PSX remains stock.
+BATO_LAUNCH_ROOT="$(printf '%s\n' /usr/lib/python*/site-packages/batocera_launch | sort -V | while read -r candidate; do [ -d "$candidate" ] && printf '%s\n' "$candidate"; done | tail -n1)"
+if [ -n "$BATO_LAUNCH_ROOT" ]; then
+  BATO_SITE="${BATO_LAUNCH_ROOT%/batocera_launch}"
+  BATO_ENTRY="$BATO_SITE/batocera_launch-44.0.dist-info/entry_points.txt"
+  install -m 0644 "$BASE/payload/batocera_launch/emulators/duckstation_lightgun.py" \
+    "$BATO_LAUNCH_ROOT/emulators/duckstation_lightgun.py"
+  if [ -f "$BATO_ENTRY" ]; then
+    [ -f "$HOTR/backups/batocera_launch_entry_points.txt.original" ] || cp -a "$BATO_ENTRY" "$HOTR/backups/batocera_launch_entry_points.txt.original"
+    grep -qx "duckstation-lightgun = batocera_launch.emulators.duckstation_lightgun:DuckstationLightgun" "$BATO_ENTRY" || \
+      sed -i "/^duckstation-legacy =/a duckstation-lightgun = batocera_launch.emulators.duckstation_lightgun:DuckstationLightgun" "$BATO_ENTRY"
+  fi
+fi
 cp -a "$BASE/installer.conf" "$HOTR/install/installer.conf"
 cp -a "$BASE/uninstall.sh" "$BASE/update.sh" "$BASE/check-install.sh" \
   "$BASE/scripts/hotr-debug-report.sh" "$BASE/scripts/hotr-status" \
@@ -247,30 +264,12 @@ rm -f /userdata/roms/ports/HookOfTheReaper.sh /userdata/roms/ports/HOTR-Setup.sh
   /userdata/roms/ports/HOTR-Rescan-Guns.sh /userdata/roms/ports/HOTR-Debug-Start.sh \
   /userdata/roms/ports/HOTR-Debug-Finish.sh
 
-install_hotr_theme_assets(){
-  local theme="" dest asset
-  if [ -r /userdata/system/configs/emulationstation/es_settings.cfg ]; then
-    theme="$(sed -n 's/.*name="ThemeSet" value="\([^"]*\)".*/\1/p' \
-      /userdata/system/configs/emulationstation/es_settings.cfg | head -n1)"
-  fi
-  [ -n "$theme" ] || { warn "Could not determine the active EmulationStation theme; skipping HOTR logos."; return 0; }
-  dest="/userdata/themes/$theme/_inc/logos"
-  if [ ! -d "/userdata/themes/$theme" ]; then
-    warn "Active theme '$theme' is not installed under /userdata/themes; skipping HOTR logos."
-    return 0
-  fi
-  mkdir -p "$dest"
-  for asset in hotr.png hotr-w.png psx-hotr.png ps2-hotr.png; do
-    [ -f "$BASE/payload/hotr/emulationstation/logos/$asset" ] || die "Missing HOTR theme asset: $asset"
-    cp -a "$BASE/payload/hotr/emulationstation/logos/$asset" "$dest/$asset"
-  done
-  msg "Installed HOTR logos into theme '$theme'."
-}
-install_hotr_theme_assets
+"$HOTR/bin/hotr-theme-sync" --all
+msg "Synced HOTR theme aliases into installed themes."
 
 CONF=/userdata/system/batocera.conf; touch "$CONF"
 set_conf(){ local k="$1" v="$2"; sed -i "/^${k//./\\.}=/d" "$CONF"; printf '%s=%s\n' "$k" "$v" >>"$CONF"; }
-set_conf psx-hotr.emulator duckstation
+set_conf psx-hotr.emulator duckstation-lightgun
 set_conf psx-hotr.core duckstation-lightgun
 set_conf psx-hotr.use_guns 1
 set_conf psx-hotr.duckstation_mamehooker true
@@ -285,7 +284,8 @@ IMPORTER="$GENROOT/importer.py"; [ -f "$IMPORTER" ] || die "configgen importer.p
 [ -f "$HOTR/backups/importer.py.original" ] || cp -a "$IMPORTER" "$HOTR/backups/importer.py.original"
 cp -a "$BASE/payload/configgen/generators/duckstation_lightgun" "$GENROOT/"
 cp -a "$BASE/payload/configgen/generators/pcsx2_lightgun" "$GENROOT/"
-cp -a "$BASE/payload/configgen/generators/lightgun_rs3.py" "$GENROOT/"
+# Removed in favor of Batocera's native `guns` discovery.
+rm -f "$GENROOT/lightgun_rs3.py"
 python3 - "$IMPORTER" <<'PY'
 from pathlib import Path
 import sys

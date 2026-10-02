@@ -12,7 +12,7 @@ payload, and the local Buildroot emulator toolchain.
 | `update.sh` / `uninstall.sh` | Update and removal operations. |
 | `installer.conf` | Emulator source/release settings. |
 | `payload/configgen/generators/` | Separate PCSX2/DuckStation configgen generators. |
-| `payload/system/99-hotr.rules` | HOTR USB permissions and serial aliases. |
+| `payload/system/99-hotr.rules` | RS3/Reaper serial-driver workaround and stable serial aliases; normal gun input remains Batocera-owned. |
 | `payload/emulators/pcsx2/resources/patches.zip` | PCSX2 game patch archive bundled with the emulator resources. |
 | `scripts/hotr-service` | Background HOTR service. |
 | `scripts/hotr-monitor` | Live service, HardwareManager, and event monitor. |

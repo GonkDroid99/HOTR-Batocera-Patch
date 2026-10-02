@@ -8,7 +8,7 @@ shift
 
 case "$SYSTEM" in
   psx-hotr)
-    EMULATOR="duckstation"
+    EMULATOR="duckstation-lightgun"
     CORE="duckstation-lightgun"
     ;;
   ps2-hotr)
@@ -26,6 +26,10 @@ LAUNCHER=(python3 -m configgen.emulatorlauncher)
 # only as a compatibility stub. Batocera 43 does not provide batocera-launch.
 if command -v batocera-launch >/dev/null 2>&1; then
   LAUNCHER=(batocera-launch)
+elif [ "$SYSTEM" = "psx-hotr" ]; then
+  # Batocera 43's configgen has DuckStation under the stock emulator name;
+  # Batocera 44 registers HOTR as its own emulator entry point.
+  EMULATOR="duckstation"
 fi
 
 mkdir -p /userdata/system/logs

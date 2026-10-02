@@ -59,14 +59,13 @@ def append_feature_flags(core, flags):
         if flag and flag not in current: current.append(flag)
     core.set('features',' '.join(current))
 
-# DuckStation: clone every stock option and keep Batocera 43.1's direct emulator feature layout.
+# DuckStation HOTR now has a separate Batocera 44 launcher name.  Cloning the
+# stock options is safe because EmulationStation will associate this node only
+# with psx-hotr, never with normal PSX's ``duckstation`` emulator.
 duck, dcore = clone_feature_target('duckstation')
-# Keep the stock emulator name: es_systems_hotr selects emulator=duckstation
-# and core=duckstation-lightgun only for configgen dispatch. Batocera 43.1's
-# DuckStation feature options live directly on the emulator node.
-duck.set('name','duckstation')
-append_feature_flags(dcore,['use_guns'])
-add_output_switch(dcore,'duckstation_mamehooker')
+duck.set('name', 'duckstation-lightgun')
+append_feature_flags(dcore, ['use_guns'])
+add_output_switch(dcore, 'duckstation_mamehooker')
 out.append(duck)
 
 # PCSX2: start from current Batocera 43 PCSX2 options.

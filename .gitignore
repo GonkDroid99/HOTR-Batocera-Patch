@@ -29,3 +29,4 @@ CLEAN_EXISTING_REPO.md
 
 scripts/test-hotr-autoconfig.sh
 .gitignore
+payload/hotr/HookOfTheReaper-x86_64.AppImage.before-20261001-2343

@@ -12,7 +12,6 @@ except ImportError:  # Batocera 44 moved the helper out of configgen.utils.
     class CaseSensitiveConfigParser(ConfigParser):
         def optionxform(self, optionstr):
             return optionstr
-from ..lightgun_rs3 import count_rs3_guns
 try:
     from ..pcsx2.pcsx2Generator import Pcsx2Generator
     _LEGACY_CONFIGGEN = True
@@ -106,36 +105,6 @@ class Pcsx2LightgunGenerator(Pcsx2Generator):
         if config_path.exists():
             pcsx2_config.read(config_path, encoding="latin-1")
 
-        # super().generate() applies the ps2-hotr options to the stock
-        # generator's file. Copy only those option keys into the isolated HOTR
-        # file; never replace the whole file, since the HOTR build has its own
-        # UI, input and emulator settings.
-        if parent_config.exists():
-            stock_config = CaseSensitiveConfigParser(interpolation=None)
-            stock_config.read(parent_config, encoding="latin-1")
-            managed_options = {
-                "EmuCore": (
-                    "EnableCheats", "EnableWideScreenPatches",
-                    "EnableNoInterlacingPatches", "TVShader",
-                ),
-                "EmuCore/GS": (
-                    "AspectRatio", "VsyncEnable", "upscale_multiplier",
-                    "fxaa", "FMVAspectRatioSwitch", "mipmap_hw",
-                    "TriFilter", "MaxAnisotropy", "dithering_ps2",
-                    "texture_preloading", "deinterlace_mode", "pcrtc_antiblur",
-                    "IntegerScaling", "accurate_blending_unit", "filter",
-                    "linear_present_mode", "LoadTextureReplacements",
-                ),
-            }
-            for section, keys in managed_options.items():
-                if not stock_config.has_section(section):
-                    continue
-                if not pcsx2_config.has_section(section):
-                    pcsx2_config.add_section(section)
-                for key in keys:
-                    if stock_config.has_option(section, key):
-                        pcsx2_config.set(section, key, stock_config.get(section, key))
-
         if not pcsx2_config.has_section("Folders"):
             pcsx2_config.add_section("Folders")
         for key, value in {
@@ -164,81 +133,22 @@ class Pcsx2LightgunGenerator(Pcsx2Generator):
             system.config.get("pcsx2_mamehooker", "true"),
         )
 
-        gun_count = len(guns) if guns else count_rs3_guns()
-        gun1onport2 = (
-            gun_count == 1
-            and "gun_gun1port" in metadata
-            and metadata["gun_gun1port"] == "2"
-        )
-
-        port_map: list[tuple[str, int]] = []
-        if not gun1onport2 and gun_count >= 1:
-            port_map.append(("USB1", 0))
-        if gun_count >= 2 or gun1onport2:
-            port_map.append(("USB2", 0 if gun1onport2 else 1))
-
-        # HOTR uses Batocera logical light-gun controls, translated to the
-        # SDL device exposed while the gun is in HOTR joystick mode. ES options
-        # can override each GunCon2 action per player/per game.
-        managed_keys = (
-            "guncon2_C", "guncon2_A", "guncon2_B", "guncon2_Trigger",
-            "guncon2_Up", "guncon2_Left", "guncon2_Right", "guncon2_Down",
-            "guncon2_ShootOffscreen", "guncon2_RelativeDown",
-            "guncon2_RelativeLeft", "guncon2_RelativeRight",
-            "guncon2_RelativeUp", "guncon2_Recalibrate", "guncon2_Start",
-            "guncon2_Select",
-        )
-        # Defaults mirror Batocera's global light-gun semantics: trigger,
-        # action, start/select, SUB buttons and d-pad. In particular PCSX2's
-        # stock mapping uses Action for C/pedal, Start for A, Select for B,
-        # SUB1 for recalibration and SUB2 for GunCon Start.
-        for usb_section, gun_idx in port_map:
-            # completely rebuild USB section so no
-            # stale guncon2_numdevice/button/SDL mappings survive.
-            if pcsx2_config.has_section(usb_section):
-                pcsx2_config.remove_section(usb_section)
-            pcsx2_config.add_section(usb_section)
-
-            player = gun_idx + 1
-            pcsx2_config.set(usb_section, "Type", "guncon2")
-            pcsx2_config.set(usb_section, "guncon2_cursor_path", "")
-            pcsx2_config.set(usb_section, "guncon2_cursor_color", "#0000ff" if player == 1 else "#ff0000")
-
-
-            # leave guncon2_numdevice unset; Batocera evdev selects by USB port
-            # Remove stale SDL mappings; native PCSX2/Batocera evdev handling
-            # owns the normal GunCon2 controls.
-            for key in managed_keys:
-                if pcsx2_config.has_option(usb_section, key):
-                    pcsx2_config.remove_option(usb_section, key)
-
-            # Match stock Batocera PCSX2: configgen explicitly supplies only
-            # the GunCon2 C/pedal key here. Other gun controls use PCSX2's
-            # native lightgun/pointer defaults.
-            pedal_keys = {1: "c", 2: "v", 3: "b", 4: "n"}
-            pedal_key = system.config.get(
-                f"controllers.pedals{player}",
-                pedal_keys.get(player, "c")
-            )
-            pcsx2_config.set(
-                usb_section,
-                "guncon2_C",
-                f"Keyboard/{pedal_key.upper()}"
-            )
-            # Native Batocera/PCSX2 GunCon2 path owns aiming.
-            # Do not create HOTR SDL Relative* mappings.
-
-        active_sections = {section for section, _ in port_map}
-        for usb_section in ("USB1", "USB2"):
-            if usb_section not in active_sections:
-                # also clear stale mappings on inactive ports.
+        # Keep display, emulation and UI choices isolated.  The two USB
+        # sections alone are refreshed from the just-generated stock config,
+        # which preserves Batocera's exact current gun detection and mapping.
+        if parent_config.exists():
+            stock_config = CaseSensitiveConfigParser(interpolation=None)
+            stock_config.read(parent_config, encoding="latin-1")
+            for usb_section in ("USB1", "USB2"):
+                if not stock_config.has_section(usb_section):
+                    continue
                 if pcsx2_config.has_section(usb_section):
                     pcsx2_config.remove_section(usb_section)
                 pcsx2_config.add_section(usb_section)
-                pcsx2_config.set(usb_section, "Type", "None")
+                for key, value in stock_config.items(usb_section):
+                    pcsx2_config.set(usb_section, key, value)
 
         with config_path.open("w", encoding="latin-1") as f:
             pcsx2_config.write(f)
 
-        # HOTR owns RS3 ZJ/ZM lifecycle. Do not send direct serial resets here.
         return cmd

@@ -1,0 +1,64 @@
+#!/bin/bash
+# Give the HOTR systems the same theme resources as their PSX/PS2 parents.
+set -euo pipefail
+
+ROOT="${HOTR_ROOT:-/userdata/system/hotr}"
+THEMES="${HOTR_THEME_ROOT:-/userdata/themes}"
+SETTINGS="${HOTR_ES_SETTINGS:-/userdata/system/configs/emulationstation/es_settings.cfg}"
+ASSETS="$ROOT/emulationstation/logos"
+
+active_theme() {
+  [ -r "$SETTINGS" ] || return 0
+  sed -n 's/.*name="ThemeSet" value="\([^"]*\)".*/\1/p' "$SETTINGS" | head -n1
+}
+
+alias_path() {
+  local source="$1" target="$2" path dir name suffix destination
+  while IFS= read -r -d '' path; do
+    dir="${path%/*}"
+    name="${path##*/}"
+    case "$name" in
+      "$source"|"$source"-*|"$source"_*|"$source".*) ;;
+      *) continue ;;
+    esac
+    suffix="${name#"$source"}"
+    destination="$dir/$target$suffix"
+    [ -e "$destination" ] || [ -L "$destination" ] || ln -s "$name" "$destination"
+  done < <(find -P "$3" -depth \( -type f -o -type d \) -print0)
+}
+
+copy_logos() {
+  local theme="$1" logo_dir asset
+  [ -d "$ASSETS" ] || return 0
+  logo_dir="$theme/_inc/logos"
+  [ -d "$logo_dir" ] || return 0
+  for asset in hotr.png hotr-w.png psx-hotr.png ps2-hotr.png; do
+    [ -f "$ASSETS/$asset" ] && cp -a "$ASSETS/$asset" "$logo_dir/$asset"
+  done
+}
+
+sync_theme() {
+  local theme="$1"
+  [ -d "$theme" ] || return 0
+  # Keep our supplied logos as real files. alias_path() intentionally never
+  # replaces an existing destination, so these override generic PSX/PS2 art.
+  copy_logos "$theme"
+  alias_path psx psx-hotr "$theme"
+  alias_path ps2 ps2-hotr "$theme"
+}
+
+case "${1:---all}" in
+  --active)
+    theme="$(active_theme)"
+    [ -n "$theme" ] && sync_theme "$THEMES/$theme"
+    ;;
+  --all)
+    for theme in "$THEMES"/*; do
+      [ -d "$theme" ] && sync_theme "$theme"
+    done
+    ;;
+  *)
+    echo "Usage: $0 [--active|--all]" >&2
+    exit 2
+    ;;
+esac

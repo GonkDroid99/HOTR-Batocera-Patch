@@ -112,6 +112,10 @@ start_hotr() {
   [ -x "$DAEMON" ] || { echo "HOTR executable missing: $DAEMON" >>"$LOGFILE"; return 1; }
   hotr_running && return 0
 
+  # The installer prepares all themes; repeat this for the active theme at
+  # boot so a newly updated theme receives its PSX/PS2 HOTR aliases.
+  [ -x "$ROOT/bin/hotr-theme-sync" ] && "$ROOT/bin/hotr-theme-sync" --active >>"$LOGFILE" 2>&1 || true
+
   rotate_log
   cleanup_stale_qipc
   export DISPLAY=:0
