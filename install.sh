@@ -240,10 +240,14 @@ if [ -n "$BATO_LAUNCH_ROOT" ]; then
   BATO_ENTRY="$BATO_SITE/batocera_launch-44.0.dist-info/entry_points.txt"
   install -m 0644 "$BASE/payload/batocera_launch/emulators/duckstation_lightgun.py" \
     "$BATO_LAUNCH_ROOT/emulators/duckstation_lightgun.py"
+  install -m 0644 "$BASE/payload/batocera_launch/emulators/pcsx2_lightgun.py" \
+    "$BATO_LAUNCH_ROOT/emulators/pcsx2_lightgun.py"
   if [ -f "$BATO_ENTRY" ]; then
     [ -f "$HOTR/backups/batocera_launch_entry_points.txt.original" ] || cp -a "$BATO_ENTRY" "$HOTR/backups/batocera_launch_entry_points.txt.original"
     grep -qx "duckstation-lightgun = batocera_launch.emulators.duckstation_lightgun:DuckstationLightgun" "$BATO_ENTRY" || \
       sed -i "/^duckstation-legacy =/a duckstation-lightgun = batocera_launch.emulators.duckstation_lightgun:DuckstationLightgun" "$BATO_ENTRY"
+    grep -qx "pcsx2-lightgun = batocera_launch.emulators.pcsx2_lightgun:Pcsx2Lightgun" "$BATO_ENTRY" || \
+      printf '%s\n' "pcsx2-lightgun = batocera_launch.emulators.pcsx2_lightgun:Pcsx2Lightgun" >> "$BATO_ENTRY"
   fi
 fi
 cp -a "$BASE/installer.conf" "$HOTR/install/installer.conf"

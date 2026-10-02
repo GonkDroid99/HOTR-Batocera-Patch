@@ -46,6 +46,16 @@ fi
 rm -rf /userdata/saves/mame/plugins/stateoutput
 rm -f /etc/udev/rules.d/99-hotr.rules /etc/udev/rules.d/99-retroshooter-joystick-override.rules
 rm -f /usr/bin/batocera-config-duckstation-hotr /usr/bin/batocera-config-pcsx2-hotr /usr/bin/batocera-config-hotr /usr/bin/hotr-gun-assignment
+LAUNCH_ROOT="$(printf '%s\n' /usr/lib/python*/site-packages/batocera_launch | sort -V | while read -r candidate; do [ -d "$candidate" ] && printf '%s\n' "$candidate"; done | tail -n1)"
+if [ -n "$LAUNCH_ROOT" ]; then
+  rm -f "$LAUNCH_ROOT/emulators/duckstation_lightgun.py" "$LAUNCH_ROOT/emulators/pcsx2_lightgun.py"
+  ENTRY="${LAUNCH_ROOT%/batocera_launch}/batocera_launch-44.0.dist-info/entry_points.txt"
+  if [ -f "$HOTR/backups/batocera_launch_entry_points.txt.original" ]; then
+    install -m 0644 "$HOTR/backups/batocera_launch_entry_points.txt.original" "$ENTRY"
+  else
+    sed -i '/^duckstation-lightgun = /d;/^pcsx2-lightgun = /d' "$ENTRY" 2>/dev/null || true
+  fi
+fi
 if [ -e "$HOTR/backups/emulationstation-standalone.original" ]; then
   install -m 0755 "$HOTR/backups/emulationstation-standalone.original" /usr/bin/emulationstation-standalone
 fi
