@@ -1,4 +1,4 @@
-#!/bin/bash
+p#!/bin/bash
 set -euo pipefail
 BASE="${1:-$(cd "$(dirname "$0")/.." && pwd)}"
 . "$BASE/installer.conf"

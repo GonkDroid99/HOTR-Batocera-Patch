@@ -342,10 +342,14 @@ else:
         legacy_end=s.find('\n}\n\n_GENERATOR_MAP', legacy_start)
         if legacy_end < 0:
             raise SystemExit('Cannot locate end of configgen legacy generator map in importer.py')
-        block="\n    'pcsx2-lightgun': {\n        'pcsx2-lightgun': ('pcsx2_lightgun.pcsx2LightgunGenerator', 'Pcsx2LightgunGenerator'),\n    },"
+        block=",\n    'pcsx2-lightgun': {\n        'pcsx2-lightgun': ('pcsx2_lightgun.pcsx2LightgunGenerator', 'Pcsx2LightgunGenerator'),\n    },"
         s=s[:legacy_end]+block+s[legacy_end:]
 p.write_text(s)
 PY
+python3 -m py_compile "$IMPORTER" || {
+  cp -a "$HOTR/backups/importer.py.original" "$IMPORTER"
+  die "HOTR configgen importer update was invalid; original importer restored."
+}
 
 mkdir -p /etc/udev/rules.d /usr/share/duckstation-lightgun
 cp -a "$BASE/payload/system/99-hotr.rules" /etc/udev/rules.d/99-hotr.rules

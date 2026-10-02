@@ -20,7 +20,11 @@ except ImportError:  # Batocera 44 keeps DuckStation in batocera-launch.
     _LEGACY_CONFIGGEN = False
 _DUCK_HOTR_DIR = Path("/userdata/system/hotr/emulators/duckstation")
 _DUCK_HOTR_QT = _DUCK_HOTR_DIR / "duckstation-lightgun-qt"
-_DUCK_HOTR_CONFIG_DIR = CONFIGS / "duckstation-lightgun"
+# DuckStation stores its files in a ``duckstation`` child directory below
+# XDG_CONFIG_HOME.  This must be a private XDG root; using CONFIGS here made
+# the V43 launch read the normal PSX configuration instead of HOTR's copy.
+_DUCK_HOTR_XDG_HOME = CONFIGS / "duckstation-lightgun"
+_DUCK_HOTR_CONFIG_DIR = _DUCK_HOTR_XDG_HOME / "duckstation"
 
 
 class DuckstationLightgunGenerator(DuckstationGenerator):
@@ -38,7 +42,7 @@ class DuckstationLightgunGenerator(DuckstationGenerator):
             return Command(
                 [str(_DUCK_HOTR_QT), '-batch', '-fullscreen', str(rom)],
                 {
-                    'XDG_CONFIG_HOME': str(_DUCK_HOTR_CONFIG_DIR.parent),
+                    'XDG_CONFIG_HOME': str(_DUCK_HOTR_XDG_HOME),
                     'DISPLAY': ':0',
                     'QT_QPA_PLATFORM': 'xcb',
                 },
@@ -56,7 +60,7 @@ class DuckstationLightgunGenerator(DuckstationGenerator):
         # Keep the HOTR build independent from stock DuckStation. The custom
         # build follows XDG_CONFIG_HOME for its settings file; its patched
         # absolute data directories remain shared only for resources/saves.
-        cmd.env["XDG_CONFIG_HOME"] = str(_DUCK_HOTR_CONFIG_DIR.parent)
+        cmd.env["XDG_CONFIG_HOME"] = str(_DUCK_HOTR_XDG_HOME)
         cmd.env["DISPLAY"] = ":0"
         cmd.env["QT_QPA_PLATFORM"] = "xcb"
         settings_path = _DUCK_HOTR_CONFIG_DIR / "settings.ini"
