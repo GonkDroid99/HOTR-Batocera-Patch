@@ -40,6 +40,7 @@ jobs:
             --dir "$RUNNER_TEMP/hotr-binaries" \
             --pattern 'duckstation-hotr.tar.gz' \
             --pattern 'pcsx2-hotr.tar.gz' \
+            --pattern 'emulationstation-hotr.tar.gz' \
             --pattern 'HookOfTheReaper-x86_64.AppImage' \
             --pattern 'SHA256SUMS'
           ls -lh "$RUNNER_TEMP/hotr-binaries"
@@ -64,6 +65,12 @@ jobs:
 
           rm -rf payload/emulators/duckstation
           mkdir -p payload/emulators/duckstation payload/emulators/pcsx2 payload/hotr
+
+          rm -rf payload/emulationstation
+          mkdir -p payload/emulationstation
+          tar -xzf "$RUNNER_TEMP/hotr-binaries/emulationstation-hotr.tar.gz" -C payload/emulationstation
+          test -x payload/emulationstation/emulationstation || { echo "ERROR: native EmulationStation binary missing" >&2; exit 3; }
+          test -x payload/emulationstation/emulationstation-standalone || { echo "ERROR: native EmulationStation launcher missing" >&2; exit 3; }
 
           tar -xzf "$RUNNER_TEMP/hotr-binaries/duckstation-hotr.tar.gz" \
             -C payload/emulators/duckstation
