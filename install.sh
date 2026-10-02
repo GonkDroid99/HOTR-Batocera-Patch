@@ -22,7 +22,11 @@ die(){ printf '[HOTR ERROR] %s\n' "$*" >&2; exit 1; }
 # uninstall.sh.
 if [ -x "$BASE/uninstall.sh" ] && { [ -d "$HOTR" ] || [ -e /usr/bin/hotr-gun-assignment ] || [ -e /userdata/system/services/hotr ]; }; then
   msg "Removing previous HOTR installation before upgrade..."
-  "$BASE/uninstall.sh"
+  # Upgrade cleanup must not prevent a fresh install. In particular, older
+  # Batocera 43 Sinden helper variants may not have a removable backup.
+  if ! "$BASE/uninstall.sh"; then
+    warn "Previous HOTR cleanup did not complete; continuing with the installation."
+  fi
 fi
 
 mkdir -p /userdata/system/logs

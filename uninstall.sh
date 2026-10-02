@@ -11,13 +11,13 @@ command -v batocera-services >/dev/null && batocera-services disable hotr 2>/dev
 # Restore Batocera's native Sinden helper if the HOTR broker integration was
 # enabled. This is separate from the optional Batocera detection workaround.
 if [ -x "$HOTR/tools/patch-batocera-sinden-hotr.sh" ]; then
-  "$HOTR/tools/patch-batocera-sinden-hotr.sh" remove 2>/dev/null || true
+  "$HOTR/tools/patch-batocera-sinden-hotr.sh" remove >/dev/null 2>&1 || true
 fi
 
 # Restore stock Batocera Sinden helpers if the optional compatibility patch was
 # applied. This is independent of the HOTR installation directory.
-if [ -x "$BASE/scripts/patch-batocera-sinden.sh" ]; then
-  "$BASE/scripts/patch-batocera-sinden.sh" remove 2>/dev/null || true
+if [ -d /userdata/system/sinden-patch-backup ] && [ -x "$BASE/scripts/patch-batocera-sinden.sh" ]; then
+  "$BASE/scripts/patch-batocera-sinden.sh" remove >/dev/null 2>&1 || true
 fi
 
 # Remove the small conditional logo include and generated branded images from
