@@ -349,7 +349,8 @@ ln -s "$HOTR/emulators/duckstation" /usr/share/duckstation-lightgun
 # Create the private configuration roots used by the HOTR generators. The
 # generators populate settings files on first launch.
 mkdir -p /userdata/system/configs/duckstation-lightgun \
-         /userdata/system/configs/pcsx2-lightgun-xdg/PCSX2/inis
+         /userdata/system/configs/pcsx2-lightgun-xdg/PCSX2/inis \
+         /userdata/system/configs/pcsx2-lightgun-xdg/PCSX2x6/inis
 
 mkdir -p /usr/share/applications /usr/bin
 cp -a "$BASE/scripts/batocera-config-duckstation-hotr" "$BASE/scripts/batocera-config-pcsx2-hotr" "$BASE/scripts/batocera-config-hotr" /usr/bin/

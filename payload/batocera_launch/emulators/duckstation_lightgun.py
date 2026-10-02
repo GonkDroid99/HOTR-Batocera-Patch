@@ -50,16 +50,15 @@ class DuckstationLightgun(Duckstation):
             settings.write(config_file)
 
     async def configure(self) -> Command:
-        self._write_settings()
+        # Keep Batocera's stock configuration and per-game launch handling,
+        # then substitute only the HOTR binary and private configuration root.
+        command = await super().configure()
+        command.args[0] = _HOTR_BINARY
+        command.env['XDG_CONFIG_HOME'] = _HOTR_CONFIG_HOME
 
-        # Keep the Qt frontend available: Batocera's fullscreen session can
-        # fail to display the patched build when -nogui is used.
-        return Command(
-            [_HOTR_BINARY, '-batch', '-fullscreen', '--', self.rom],
-            env={
-                'XDG_CONFIG_HOME': _HOTR_CONFIG_HOME,
-                'QT_QPA_PLATFORM': 'xcb',
-                'SDL_JOYSTICK_HIDAPI': '0',
-                'LD_LIBRARY_PATH': '/usr/stenzek-shaderc/lib:/usr/lib',
-            },
-        )
+        # The HOTR Qt build needs a visible frontend rather than -nogui.
+        if '-nogui' in command.args:
+            command.args[command.args.index('-nogui')] = '-fullscreen'
+        elif '-fullscreen' not in command.args:
+            command.args.insert(1, '-fullscreen')
+        return command
