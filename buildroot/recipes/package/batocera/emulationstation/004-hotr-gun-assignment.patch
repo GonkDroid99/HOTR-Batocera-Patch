@@ -86,15 +86,15 @@ index e3344420..a9eb848d 100644
 +			(*pending)[player - 1] = gun;
 +		});
 +	}
-+	settings->addEntry(_("SAVE ASSIGNMENTS"), true, [window, pending]()
++	settings->addEntry(_("Save assignments"), true, [window, pending]()
 +	{
 +		std::string command = "/usr/bin/hotr-gun-assignment assign-batch";
 +		for (size_t i = 0; i < pending->size(); i++)
 +			command += " " + std::to_string(i + 1) + " " + std::to_string((*pending)[i]);
 +		if (std::system(command.c_str()) != 0)
-+			window->pushGui(new GuiMsgBox(window, _("COULD NOT SAVE HOTR GUN ASSIGNMENTS.")));
++			window->pushGui(new GuiMsgBox(window, _("Could not save HOTR gun assignments.")));
 +		else
-+			window->pushGui(new GuiMsgBox(window, _("HOTR GUN ASSIGNMENTS SAVED SUCCESSFULLY.")));
++			window->pushGui(new GuiMsgBox(window, _("HOTR gun assignments saved successfully.")));
 +	});
 +	window->pushGui(settings);
 +}
