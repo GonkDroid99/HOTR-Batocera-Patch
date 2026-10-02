@@ -125,6 +125,8 @@ def assign_batch(pairs):
     assigned = [gun for gun in requested.values() if gun != 69]
     if len(assigned) != len(set(assigned)):
         raise RuntimeError("a gun cannot be assigned to more than one player")
+    if set(assigned) != active:
+        raise RuntimeError("every connected gun must be assigned to a player")
     # Clear the selected player slots first, then clear any stale duplicate
     # references before placing each requested gun. This also makes choosing
     # UNASSIGNED (69) remove the gun from that player without leaving it on a
