@@ -86,8 +86,8 @@ index e3344420..a9eb848d 100644
 +				window->pushGui(new GuiMsgBox(window, _("COULD NOT SAVE HOTR GUN ASSIGNMENT.")));
 +				return;
 +			}
-+			delete settings;
-+			openHotrGunAssignments(window);
++			// Keep the current GUI alive while the callback unwinds. The updated
++			// assignment is persisted immediately; reopen this menu to refresh it.
 +		});
 +	}
 +	window->pushGui(settings);

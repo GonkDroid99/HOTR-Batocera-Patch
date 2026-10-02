@@ -15,6 +15,16 @@ die(){ printf '[HOTR ERROR] %s\n' "$*" >&2; exit 1; }
 
 [ "$(id -u)" -eq 0 ] || die "Run this installer as root."
 [ "$(uname -m)" = "x86_64" ] || die "This release targets x86_64 only."
+
+# Cleanly remove an older HOTR integration before replacing files. This keeps
+# stale generators, native EmulationStation backups, and old services from
+# surviving an upgrade. The persistent HOTR data directory is preserved by
+# uninstall.sh.
+if [ -x "$BASE/uninstall.sh" ] && { [ -d "$HOTR" ] || [ -e /usr/bin/hotr-gun-assignment ] || [ -e /userdata/system/services/hotr ]; }; then
+  msg "Removing previous HOTR installation before upgrade..."
+  "$BASE/uninstall.sh"
+fi
+
 mkdir -p /userdata/system/logs
 exec > >(tee -a "$LOG") 2>&1
 

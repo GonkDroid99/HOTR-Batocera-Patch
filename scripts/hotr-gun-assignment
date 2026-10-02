@@ -111,12 +111,37 @@ def assign(player, gun):
                        check=False)
 
 
+def assign_batch(pairs):
+    active = {index for index, _label, _active in read_guns()}
+    values = read_assignments()
+    while len(values) < 8:
+        values.append(69)
+    requested = {}
+    for player, gun in pairs:
+        if player < 1 or gun not in active:
+            raise RuntimeError("gun is not connected")
+        requested[player - 1] = gun
+    for player, gun in requested.items():
+        for index, value in enumerate(values):
+            if index != player and value == gun:
+                values[index] = values[player]
+        values[player] = gun
+    save_assignments(values)
+    if SERVICE.is_file() and os.access(SERVICE, os.X_OK):
+        subprocess.run([str(SERVICE), "restart"], stdin=subprocess.DEVNULL,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                       check=False)
+
+
 def main(argv):
     if len(argv) == 2 and argv[1] == "list":
         list_guns()
         return 0
     if len(argv) == 4 and argv[1] == "assign":
         assign(int(argv[2]), int(argv[3]))
+        return 0
+    if len(argv) >= 4 and argv[1] == "assign-batch" and len(argv[2:]) % 2 == 0:
+        assign_batch([(int(argv[i]), int(argv[i + 1])) for i in range(2, len(argv), 2)])
         return 0
     print(f"usage: {argv[0]} list | assign PLAYER GUN", file=sys.stderr)
     return 2
