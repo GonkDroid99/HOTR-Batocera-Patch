@@ -65,8 +65,8 @@ class DuckstationLightgunGenerator(DuckstationGenerator):
         if settings_path.exists():
             settings.read(settings_path)
         elif stock_settings_path.exists():
-            # Seed the isolated HOTR configuration once from Batocera's
-            # complete normal DuckStation configuration.
+            # Seed the isolated HOTR configuration once from normal
+            # DuckStation, then preserve HOTR-specific changes.
             settings.read(stock_settings_path)
 
         if stock_settings_path.exists():

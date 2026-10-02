@@ -22,9 +22,15 @@ case "$SYSTEM" in
 esac
 
 LAUNCHER=(python3 -m configgen.emulatorlauncher)
-# Batocera 44 introduced batocera-launch and retained the old Python module
-# only as a compatibility stub. Batocera 43 does not provide batocera-launch.
-if command -v batocera-launch >/dev/null 2>&1; then
+# Batocera 44's batocera-launch requires a registered entry point for every
+# custom emulator. HOTR currently registers DuckStation, while PCSX2 may be
+# running through the legacy configgen importer, so only use batocera-launch
+# when both custom launchers are installed. Otherwise use the compatibility
+# launcher, which invokes the HOTR generators directly.
+BATO_LAUNCH_ROOT="$(printf '%s\n' /usr/lib/python*/site-packages/batocera_launch | sort -V | while read -r candidate; do [ -d "$candidate" ] && printf '%s\n' "$candidate"; done | tail -n1)"
+if command -v batocera-launch >/dev/null 2>&1 && \
+   [ -f "$BATO_LAUNCH_ROOT/emulators/duckstation_lightgun.py" ] && \
+   [ -f "$BATO_LAUNCH_ROOT/emulators/pcsx2_lightgun.py" ]; then
   LAUNCHER=(batocera-launch)
 elif [ "$SYSTEM" = "psx-hotr" ]; then
   # Batocera 43's configgen has DuckStation under the stock emulator name;

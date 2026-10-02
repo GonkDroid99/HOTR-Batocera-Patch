@@ -96,6 +96,8 @@ class Pcsx2LightgunGenerator(Pcsx2Generator):
         # Seed once from stock PCSX2 as an initial baseline. After that, the
         # HOTR config remains independent; Batocera options for ps2-hotr are
         # applied directly below instead of replacing this file from stock.
+        # Seed the separate HOTR configuration once from normal PCSX2. After
+        # that, preserve settings changed directly in the HOTR emulator.
         if not config_path.exists() and parent_config.exists():
             content = parent_config.read_bytes().decode("latin-1")
             content = content.replace("/usr/pcsx2/bin", str(_PCSX2_LIGHTGUN_BIN_DIR))
