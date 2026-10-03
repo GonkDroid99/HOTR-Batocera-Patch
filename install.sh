@@ -373,9 +373,7 @@ cp -a "$BASE/scripts/desktop/"*.desktop /usr/share/applications/
 # built for the exact Batocera revision. If the release contains one, install
 # it and retain the stock binary for clean uninstall/rollback.
 NATIVE_ES="$BASE/payload/emulationstation/emulationstation-standalone"
-if [ "${HOTR_SKIP_NATIVE_ES:-0}" = 1 ]; then
-  msg "Skipping native EmulationStation payload (HOTR_SKIP_NATIVE_ES=1)."
-elif [ -x "$NATIVE_ES" ]; then
+  [ -x "$NATIVE_ES" ]; then
   NATIVE_ES_BIN="$BASE/payload/emulationstation/emulationstation"
   ES_BIN_BACKUP="$HOTR/backups/emulationstation.original"
   if [ -x "$NATIVE_ES_BIN" ]; then
