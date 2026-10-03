@@ -1,0 +1,38 @@
+diff --git a/package/rust-bin/rust-bin.mk b/package/rust-bin/rust-bin.mk
+index 5da61ffc19..0000000000 100644
+--- a/package/rust-bin/rust-bin.mk
++++ b/package/rust-bin/rust-bin.mk
+@@ -6,6 +6,6 @@
+ # When updating this version, check whether support/download/cargo-post-process
+ # still generates the same archives.
+-RUST_BIN_VERSION = 1.95.0
++RUST_BIN_VERSION = 1.97.0
+ RUST_BIN_SITE = https://static.rust-lang.org/dist
+ RUST_BIN_LICENSE = Apache-2.0 or MIT
+ RUST_BIN_LICENSE_FILES = LICENSE-APACHE LICENSE-MIT
+diff --git a/package/rust-bin/rust-bin.hash b/package/rust-bin/rust-bin.hash
+--- a/package/rust-bin/rust-bin.hash
++++ b/package/rust-bin/rust-bin.hash
+@@ -19,0 +20,4 @@
++# From https://static.rust-lang.org/dist/rust-1.97.0-x86_64-unknown-linux-gnu.tar.xz.sha256
++sha256  1cf17e4905b841d4c8e3f76467ac148d55fb3f54bf213c86f0d287a36471d904  rust-1.97.0-x86_64-unknown-linux-gnu.tar.xz
++# From https://static.rust-lang.org/dist/rust-std-1.97.0-x86_64-unknown-linux-gnu.tar.xz.sha256
++sha256  0c43618128a7a6b96b0b04c04cf7b28dd52fb0991a74c9615fbd1a684ff88712  rust-std-1.97.0-x86_64-unknown-linux-gnu.tar.xz
+diff --git a/package/rust/rust.mk b/package/rust/rust.mk
+index 5da61ffc19..0000000000 100644
+--- a/package/rust/rust.mk
++++ b/package/rust/rust.mk
+@@ -6,6 +6,6 @@
+ # When updating this version, check whether support/download/cargo-post-process
+ # still generates the same archives.
+-RUST_VERSION = 1.95.0
++RUST_VERSION = 1.97.0
+ RUST_SOURCE = rustc-$(RUST_VERSION)-src.tar.xz
+ RUST_SITE = https://static.rust-lang.org/dist
+ RUST_LICENSE = Apache-2.0 or MIT
+diff --git a/package/rust/rust.hash b/package/rust/rust.hash
+--- a/package/rust/rust.hash
++++ b/package/rust/rust.hash
+@@ -5,0 +6,2 @@
++# From https://static.rust-lang.org/dist/rustc-1.97.0-src.tar.xz.sha256
++sha256  de002ee301c1b7422b0a7b09d7c4cb4924cd3224e6cfb24f065dad786dd3ed12  rustc-1.97.0-src.tar.xz

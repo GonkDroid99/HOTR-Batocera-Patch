@@ -78,6 +78,28 @@ if ! grep -q "batocera.linux $BUILD_SERIES" "$BATOCERA_TREE/batocera-Changelog.m
   echo "WARNING: checkout does not obviously contain the Batocera $BUILD_SERIES changelog."
 fi
 
+# The v44 checkout currently pins Rust 1.95 while cargo-c 0.10.19 requires
+# Rust 1.97. Keep this narrowly scoped compatibility update tracked here.
+if [ "$BUILD_SERIES" = 44 ]; then
+  RUST_PATCH="$HERE/patches/v44/0001-rust-1.97-for-cargo-c.patch"
+  [ -f "$RUST_PATCH" ] || { echo "ERROR: missing v44 Rust compatibility patch: $RUST_PATCH" >&2; exit 2; }
+  if git -C "$BATOCERA_TREE/buildroot" apply --reverse --check "$RUST_PATCH" >/dev/null 2>&1; then
+    echo "v44 Rust 1.97 compatibility patch already applied."
+  elif git -C "$BATOCERA_TREE/buildroot" apply --check "$RUST_PATCH"; then
+    git -C "$BATOCERA_TREE/buildroot" apply "$RUST_PATCH"
+    echo "Applied v44 Rust 1.97 compatibility patch."
+  else
+    echo "ERROR: unable to apply the v44 Rust compatibility patch." >&2
+    exit 2
+  fi
+  RUSTC="$BATOCERA_TREE/output/$BATOCERA_TARGET/host/bin/rustc"
+  if [ -x "$RUSTC" ] && ! "$RUSTC" --version | grep -q 'rustc 1\.97\.'; then
+    echo "Removing stale host Rust 1.95 build state so Buildroot installs Rust 1.97."
+    rm -rf "$BATOCERA_TREE/output/$BATOCERA_TARGET/build/host-rustc" \
+           "$BATOCERA_TREE/output/$BATOCERA_TARGET/build/host-rust-bin-1.95.0"
+  fi
+fi
+
 # Stage custom source INSIDE the Batocera tree so its build Docker container can see it.
 mkdir -p "$BATOCERA_TREE/.hotr-sources"
 if [ "$BUILD_EMULATOR" = "both" ] || [ "$BUILD_EMULATOR" = "duckstation" ]; then

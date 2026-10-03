@@ -36,6 +36,14 @@ PCSX2_LIGHTGUN_CONF_OPTS += -DUSE_SYSTEM_LIBS=AUTO
 # The following flag is misleading and *needed* ON to avoid doing -march=native
 PCSX2_LIGHTGUN_CONF_OPTS += -DDISABLE_ADVANCE_SIMD=ON
 
+# v44's CMake/toolchain does not provide the CXX WHOLE_ARCHIVE link feature
+# used by current PCSX2 sources. Match the stock v44 package and translate it
+# to the GNU linker flags before CMake configures the project.
+define PCSX2_LIGHTGUN_FIX_WHOLE_ARCHIVE
+    find $(@D) -name "CMakeLists.txt" -exec sed -i 's|.[<]LINK_LIBRARY:WHOLE_ARCHIVE,\([^>]*\)>|-Wl,--whole-archive \1 -Wl,--no-whole-archive|g' {} +
+endef
+PCSX2_LIGHTGUN_PRE_CONFIGURE_HOOKS += PCSX2_LIGHTGUN_FIX_WHOLE_ARCHIVE
+
 ifeq ($(BR2_PACKAGE_XORG7),y)
     PCSX2_LIGHTGUN_CONF_OPTS += -DX11_API=ON
 else
