@@ -7,10 +7,11 @@ changing it.  Normal PSX therefore remains completely unaware of HOTR.
 from __future__ import annotations
 
 from pathlib import Path
+from shutil import copyfile
 from typing import Final
 
 from batocera_common.configparser import CaseSensitiveConfigParser
-from batocera_common.dataclasses import cached_property
+from batocera_common.dataclasses import cached_dataclass, cached_property
 from batocera_common.paths import CONFIGS
 from batocera_launch import Command, HotkeysContext
 from batocera_launch.emulators.duckstation import Duckstation
@@ -20,6 +21,7 @@ _HOTR_BINARY: Final = _HOTR_DIRECTORY / 'duckstation-lightgun-qt'
 _HOTR_CONFIG_HOME: Final = CONFIGS / 'duckstation-lightgun'
 
 
+@cached_dataclass
 class DuckstationLightgun(Duckstation):
     """Stock DuckStation configuration with HOTR's binary and output bridge."""
 
@@ -35,7 +37,23 @@ class DuckstationLightgun(Duckstation):
         context['name'] = 'duckstation-lightgun'
         return context
 
+    @cached_property
+    def sdl_controller_db_path(self) -> Path:
+        # The HOTR binary is compiled to load resources from its own symlinked
+        # share directory.  Do not overwrite normal DuckStation's database.
+        return _HOTR_DIRECTORY / 'resources' / 'gamecontrollerdb.txt'
+
+    def _seed_settings(self) -> None:
+        """Seed the isolated HOTR profile from normal DuckStation once."""
+        settings_path = self.config_dir / 'settings.ini'
+        stock_settings_path = CONFIGS / 'duckstation' / 'settings.ini'
+        if settings_path.exists() or not stock_settings_path.is_file():
+            return
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        copyfile(stock_settings_path, settings_path)
+
     def _write_settings(self) -> None:
+        self._seed_settings()
         super()._write_settings()
 
         # The custom DuckStation binary starts MameOutputSender when a game

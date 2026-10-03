@@ -21,6 +21,10 @@ die() { echo "hotr-sinden-worker-launch: $*" >&2; exit 1; }
 [ -x "$BROKER" ] || die "broker is not installed: $BROKER"
 
 mkdir -p "$RUN" "$ROOT"
+# A first-time Sinden install has no persistent assignment file yet.  Create
+# it before the slot lookup; otherwise awk treats the missing file as an
+# error and neither Player 1 nor Player 2 can be selected.
+[ -e "$MAP" ] || : >"$MAP"
 PTYFILE="$RUN/p${HASH}.pty"
 PIDFILE="$RUN/p${HASH}.worker.pid"
 LOCK="$RUN/player-map.lock"
@@ -33,6 +37,19 @@ fi
 # Assign a stable HOTR player number to the physical Sinden identity. The
 # mapping survives reboots/updates, while the actual tty and PTY are rebuilt.
 while ! mkdir "$LOCK" 2>/dev/null; do sleep 0.05; done
+# A player map can outlive a disconnected/replaced gun.  Retain assignments
+# only for Sinden trackers which Batocera has created during this boot; this
+# keeps a connected pair stable while releasing slots held by old hardware.
+MAP_TMP="$RUN/player-map.$$"
+if [ -f "$MAP" ]; then
+    : >"$MAP_TMP"
+    while IFS='=' read -r known_hash known_player; do
+        case "$known_player" in 1|2) ;; *) continue ;; esac
+        [ -d "/var/run/sinden/p${known_hash}" ] || continue
+        printf '%s=%s\n' "$known_hash" "$known_player" >>"$MAP_TMP"
+    done <"$MAP"
+    mv -f "$MAP_TMP" "$MAP"
+fi
 player="$(awk -F= -v h="$HASH" '$1 == h {print $2; exit}' "$MAP" 2>/dev/null || true)"
 if [ "$player" != 1 ] && [ "$player" != 2 ]; then
     for candidate in 1 2; do
