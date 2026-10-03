@@ -19,6 +19,8 @@ from batocera_launch.emulators.duckstation import Duckstation
 _HOTR_DIRECTORY: Final = Path('/userdata/system/hotr/emulators/duckstation')
 _HOTR_BINARY: Final = _HOTR_DIRECTORY / 'duckstation-lightgun-qt'
 _HOTR_CONFIG_HOME: Final = CONFIGS / 'duckstation-lightgun'
+_SYSTEM: Final = CONFIGS.parent
+_USERDATA: Final = _SYSTEM.parent
 
 
 @cached_dataclass
@@ -61,6 +63,16 @@ class DuckstationLightgun(Duckstation):
         settings_path = self.config_dir / 'settings.ini'
         settings = CaseSensitiveConfigParser(interpolation=None)
         settings.read(settings_path)
+        if settings.has_section('MemoryCards'):
+            settings.set('MemoryCards', 'Directory', str(_USERDATA / 'saves' / 'duckstation' / 'memcards'))
+        if settings.has_section('Folders'):
+            for key, value in {
+                'Cache': _SYSTEM / 'cache' / 'duckstation',
+                'Screenshots': _USERDATA / 'screenshots',
+                'SaveStates': _USERDATA / 'saves' / 'duckstation',
+                'Cheats': _USERDATA / 'cheats' / 'duckstation',
+            }.items():
+                settings.set('Folders', key, str(value))
         if not settings.has_section('Main'):
             settings.add_section('Main')
         settings.set('Main', 'EnableMameHooker', self.config.get('duckstation_mamehooker', 'true'))

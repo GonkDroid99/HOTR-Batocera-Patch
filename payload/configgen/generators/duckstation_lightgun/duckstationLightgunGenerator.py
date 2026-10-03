@@ -25,6 +25,8 @@ _DUCK_HOTR_QT = _DUCK_HOTR_DIR / "duckstation-lightgun-qt"
 # the V43 launch read the normal PSX configuration instead of HOTR's copy.
 _DUCK_HOTR_XDG_HOME = CONFIGS / "duckstation-lightgun"
 _DUCK_HOTR_CONFIG_DIR = _DUCK_HOTR_XDG_HOME / "duckstation"
+_SYSTEM = CONFIGS.parent
+_USERDATA = _SYSTEM.parent
 
 
 class DuckstationLightgunGenerator(DuckstationGenerator):
@@ -100,6 +102,16 @@ class DuckstationLightgunGenerator(DuckstationGenerator):
 
         if not settings.has_section("Main"):
             settings.add_section("Main")
+        if settings.has_section("MemoryCards"):
+            settings.set("MemoryCards", "Directory", str(_USERDATA / "saves" / "duckstation" / "memcards"))
+        if settings.has_section("Folders"):
+            for key, value in {
+                "Cache": _SYSTEM / "cache" / "duckstation",
+                "Screenshots": _USERDATA / "screenshots",
+                "SaveStates": _USERDATA / "saves" / "duckstation",
+                "Cheats": _USERDATA / "cheats" / "duckstation",
+            }.items():
+                settings.set("Folders", key, str(value))
         settings.set(
             "Main",
             "EnableMameHooker",
