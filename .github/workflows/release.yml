@@ -19,12 +19,40 @@ permissions:
   contents: write
 
 jobs:
+  discover-payloads:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.payloads.outputs.matrix }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      BINARY_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.binary_tag || 'binaries-v1' }}
+    steps:
+      - id: payloads
+        name: Find published Batocera payload series
+        shell: bash
+        run: |
+          set -euo pipefail
+          assets="$(gh release view "$BINARY_TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')"
+          series=()
+          for candidate in 43 44; do
+            if grep -qx "duckstation-hotr-v$candidate.tar.gz" <<<"$assets" && \
+               grep -qx "pcsx2-hotr-v$candidate.tar.gz" <<<"$assets" && \
+               grep -qx "emulationstation-hotr-v$candidate.tar.gz" <<<"$assets" && \
+               grep -qx "SHA256SUMS-v$candidate" <<<"$assets"; then
+              series+=("$candidate")
+            fi
+          done
+          [ "${#series[@]}" -gt 0 ] || { echo "ERROR: no complete v43/v44 payload set in $BINARY_TAG" >&2; exit 2; }
+          joined="$(IFS=,; echo "${series[*]}")"
+          echo "matrix={\"series\":[$joined]}" >> "$GITHUB_OUTPUT"
+          echo "Building installer series: ${series[*]}"
+
   package:
+    needs: discover-payloads
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
-      matrix:
-        series: [43, 44]
+      matrix: ${{ fromJSON(needs.discover-payloads.outputs.matrix) }}
     env:
       GH_TOKEN: ${{ github.token }}
       BINARY_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.binary_tag || 'binaries-v1' }}
@@ -72,7 +100,8 @@ jobs:
 
           rm -rf payload/emulationstation
           mkdir -p payload/emulationstation
-          tar -xzf "$RUNNER_TEMP/hotr-binaries/emulationstation-hotr-v${{ matrix.series }}.tar.gz" -C payload/emulationstation
+          ES_ARCHIVE="$RUNNER_TEMP/hotr-binaries/emulationstation-hotr-v${{ matrix.series }}.tar.gz"
+          tar -xzf "$ES_ARCHIVE" -C payload/emulationstation
           test -x payload/emulationstation/emulationstation || { echo "ERROR: native EmulationStation binary missing" >&2; exit 3; }
           test -x payload/emulationstation/emulationstation-standalone || { echo "ERROR: native EmulationStation launcher missing" >&2; exit 3; }
 
