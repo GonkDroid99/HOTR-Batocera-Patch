@@ -4,8 +4,10 @@ CONF=/userdata/system/hotr/install/installer.conf
 [ -f "$CONF" ] || { echo "Missing $CONF"; exit 1; }
 . "$CONF"
 [[ "$HOTR_INSTALLER_REPO" != OWNER/* ]] || { echo 'Set HOTR_INSTALLER_REPO in installer.conf first.'; exit 2; }
+VER="$(cat /usr/share/batocera/batocera.version 2>/dev/null || true)"
+case "$VER" in *44*) RX="$HOTR_RELEASE_ASSET_REGEX_V44" ;; *) RX="$HOTR_RELEASE_ASSET_REGEX_V43" ;; esac
 TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
-python3 - "$HOTR_INSTALLER_REPO" "$HOTR_RELEASE_ASSET_REGEX" "$TMP/release.zip" <<'PY'
+python3 - "$HOTR_INSTALLER_REPO" "$RX" "$TMP/release.zip" <<'PY'
 import json,re,sys,urllib.request
 repo,rx,out=sys.argv[1:]
 req=urllib.request.Request(f'https://api.github.com/repos/{repo}/releases/latest',headers={'User-Agent':'HOTR-Updater'})

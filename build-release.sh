@@ -1,7 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-NAME="HOTR-Batocera43-x86_64.zip"
+SERIES="${HOTR_RELEASE_SERIES:-43}"
+case "$SERIES" in 43|44) ;; *) echo "ERROR: HOTR_RELEASE_SERIES must be 43 or 44" >&2; exit 2;; esac
+NAME="HOTR-Batocera${SERIES}-x86_64.zip"
 OUTDIR="$ROOT/dist"
 
 need_exec() {

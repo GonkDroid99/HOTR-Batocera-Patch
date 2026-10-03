@@ -21,6 +21,10 @@ permissions:
 jobs:
   package:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        series: [43, 44]
     env:
       GH_TOKEN: ${{ github.token }}
       BINARY_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.binary_tag || 'binaries-v1' }}
@@ -38,11 +42,11 @@ jobs:
           gh release download "$BINARY_TAG" \
             --repo "$GITHUB_REPOSITORY" \
             --dir "$RUNNER_TEMP/hotr-binaries" \
-            --pattern 'duckstation-hotr.tar.gz' \
-            --pattern 'pcsx2-hotr.tar.gz' \
-            --pattern 'emulationstation-hotr.tar.gz' \
+            --pattern 'duckstation-hotr-v${{ matrix.series }}.tar.gz' \
+            --pattern 'pcsx2-hotr-v${{ matrix.series }}.tar.gz' \
+            --pattern 'emulationstation-hotr-v${{ matrix.series }}.tar.gz' \
             --pattern 'HookOfTheReaper-x86_64.AppImage' \
-            --pattern 'SHA256SUMS'
+            --pattern 'SHA256SUMS-v${{ matrix.series }}'
           ls -lh "$RUNNER_TEMP/hotr-binaries"
 
       - name: Verify binary payload checksums
@@ -50,7 +54,7 @@ jobs:
         run: |
           set -euo pipefail
           cd "$RUNNER_TEMP/hotr-binaries"
-          sha256sum -c SHA256SUMS
+          sha256sum -c "SHA256SUMS-v${{ matrix.series }}"
 
       - name: Assemble runtime payload
         shell: bash
@@ -68,16 +72,16 @@ jobs:
 
           rm -rf payload/emulationstation
           mkdir -p payload/emulationstation
-          tar -xzf "$RUNNER_TEMP/hotr-binaries/emulationstation-hotr.tar.gz" -C payload/emulationstation
+          tar -xzf "$RUNNER_TEMP/hotr-binaries/emulationstation-hotr-v${{ matrix.series }}.tar.gz" -C payload/emulationstation
           test -x payload/emulationstation/emulationstation || { echo "ERROR: native EmulationStation binary missing" >&2; exit 3; }
           test -x payload/emulationstation/emulationstation-standalone || { echo "ERROR: native EmulationStation launcher missing" >&2; exit 3; }
 
-          tar -xzf "$RUNNER_TEMP/hotr-binaries/duckstation-hotr.tar.gz" \
+          tar -xzf "$RUNNER_TEMP/hotr-binaries/duckstation-hotr-v${{ matrix.series }}.tar.gz" \
             -C payload/emulators/duckstation
 
           test -x payload/emulators/duckstation/duckstation-lightgun-qt || { echo "ERROR: DuckStation archive missing duckstation-lightgun-qt" >&2; exit 3; }
 
-          tar -xzf "$RUNNER_TEMP/hotr-binaries/pcsx2-hotr.tar.gz" -C payload/emulators/pcsx2
+          tar -xzf "$RUNNER_TEMP/hotr-binaries/pcsx2-hotr-v${{ matrix.series }}.tar.gz" -C payload/emulators/pcsx2
           test -x payload/emulators/pcsx2/pcsx2-lightgun-qt || { echo "ERROR: PCSX2 archive missing pcsx2-lightgun-qt" >&2; exit 3; }
 
           install -m 0755 "$RUNNER_TEMP/hotr-binaries/HookOfTheReaper-x86_64.AppImage" \
@@ -100,17 +104,17 @@ jobs:
         run: |
           set -euo pipefail
           chmod +x build-release.sh
-          ./build-release.sh
-          sha256sum dist/HOTR-Batocera43-x86_64.zip > dist/HOTR-Batocera43-x86_64.zip.sha256
+          HOTR_RELEASE_SERIES="${{ matrix.series }}" ./build-release.sh
+          sha256sum "dist/HOTR-Batocera${{ matrix.series }}-x86_64.zip" > "dist/HOTR-Batocera${{ matrix.series }}-x86_64.zip.sha256"
           ls -lh dist/
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: HOTR-Batocera43-x86_64
+          name: HOTR-Batocera${{ matrix.series }}-x86_64
           path: |
-            dist/HOTR-Batocera43-x86_64.zip
-            dist/HOTR-Batocera43-x86_64.zip.sha256
+            dist/HOTR-Batocera${{ matrix.series }}-x86_64.zip
+            dist/HOTR-Batocera${{ matrix.series }}-x86_64.zip.sha256
 
       - name: Create/update normal GitHub release
         uses: softprops/action-gh-release@v2
@@ -120,5 +124,5 @@ jobs:
           prerelease: false
           generate_release_notes: true
           files: |
-            dist/HOTR-Batocera43-x86_64.zip
-            dist/HOTR-Batocera43-x86_64.zip.sha256
+            dist/HOTR-Batocera${{ matrix.series }}-x86_64.zip
+            dist/HOTR-Batocera${{ matrix.series }}-x86_64.zip.sha256

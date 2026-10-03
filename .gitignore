@@ -22,6 +22,8 @@ __pycache__/
 
 # Batocera Buildroot working data / native binary outputs
 buildroot/buildroot.conf
+buildroot/buildroot.v44.conf
+buildroot/src/
 dist/buildroot-binaries/
 UPDATE-2026-09-25.md
 BINARY_RELEASES.md

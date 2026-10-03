@@ -5,11 +5,14 @@ ROOT="$(cd "$HERE/.." && pwd)"
 CONF="${HOTR_BUILD_CONF:-$HERE/buildroot.conf}"
 
 BUILD_EMULATOR="both"
+BUILD_SERIES=""
 usage(){
   cat <<EOF
-Usage: $0 [--pcsx2|--duckstation|--emulationstation|--both|--emulator NAME]
+Usage: $0 [--pcsx2|--duckstation|--emulationstation|--both|--emulator NAME] [--series 43|44]
 
 Build one emulator or both (default).
+The series selects an independent Batocera checkout/cache and labels the
+resulting archives. It defaults to BATOCERA_SERIES from the build config, or 43.
 EOF
 }
 
@@ -22,6 +25,11 @@ while [ "$#" -gt 0 ]; do
     --emulator)
       [ "$#" -ge 2 ] || { echo "ERROR: --emulator needs pcsx2, duckstation, or both." >&2; usage >&2; exit 2; }
       BUILD_EMULATOR="$2"
+      shift 2
+      ;;
+    --series)
+      [ "$#" -ge 2 ] || { echo "ERROR: --series needs 43 or 44." >&2; usage >&2; exit 2; }
+      BUILD_SERIES="$2"
       shift 2
       ;;
     -h|--help) usage; exit 0 ;;
@@ -40,6 +48,11 @@ esac
 : "${BATOCERA_TREE:?}" "${DUCKSTATION_SOURCE:?}" "${PCSX2_SOURCE:?}"
 BATOCERA_TARGET="${BATOCERA_TARGET:-x86_64}"
 AUTO_CLONE_BATOCERA="${AUTO_CLONE_BATOCERA:-0}"
+BUILD_SERIES="${BUILD_SERIES:-${BATOCERA_SERIES:-43}}"
+case "$BUILD_SERIES" in
+  43|44) ;;
+  *) echo "ERROR: Batocera series must be 43 or 44: $BUILD_SERIES" >&2; exit 2 ;;
+esac
 
 need(){ command -v "$1" >/dev/null || { echo "ERROR: missing $1" >&2; exit 2; }; }
 need git; need rsync; need tar; need make; need python3
@@ -61,7 +74,9 @@ if [ -n "${BATOCERA_REF:-}" ]; then
 fi
 
 echo "Batocera checkout: $(git -C "$BATOCERA_TREE" rev-parse --short HEAD)"
-grep -q 'batocera.linux 43' "$BATOCERA_TREE/batocera-Changelog.md" || echo "WARNING: checkout does not obviously contain the Batocera 43 changelog."
+if ! grep -q "batocera.linux $BUILD_SERIES" "$BATOCERA_TREE/batocera-Changelog.md"; then
+  echo "WARNING: checkout does not obviously contain the Batocera $BUILD_SERIES changelog."
+fi
 
 # Stage custom source INSIDE the Batocera tree so its build Docker container can see it.
 mkdir -p "$BATOCERA_TREE/.hotr-sources"
@@ -112,20 +127,20 @@ fi
 
 if [ "$BUILD_EMULATOR" = "both" ] || [ "$BUILD_EMULATOR" = "pcsx2" ]; then
   echo "=== Building PCSX2 LightGun for $BATOCERA_TARGET ==="
-  make "${BATOCERA_TARGET}-pkg" PKG=pcsx2-lightgun
+  make BATCH_MODE=1 "${BATOCERA_TARGET}-pkg" PKG=pcsx2-lightgun
 fi
 if [ "$BUILD_EMULATOR" = "both" ] || [ "$BUILD_EMULATOR" = "duckstation" ]; then
   echo "=== Building DuckStation LightGun for $BATOCERA_TARGET ==="
-  make "${BATOCERA_TARGET}-pkg" PKG=duckstation-lightgun
+  make BATCH_MODE=1 "${BATOCERA_TARGET}-pkg" PKG=duckstation-lightgun
 fi
 if [ "$BUILD_EMULATOR" = "emulationstation" ]; then
   echo "=== Building native EmulationStation with HOTR gun assignment menu for $BATOCERA_TARGET ==="
-  make "${BATOCERA_TARGET}-pkg" PKG=batocera-emulationstation
+  make BATCH_MODE=1 "${BATOCERA_TARGET}-pkg" PKG=batocera-emulationstation
 fi
 
 
 TARGET="$BATOCERA_TREE/output/$BATOCERA_TARGET/target"
-DIST="$ROOT/dist/buildroot-binaries"
+DIST="$ROOT/dist/buildroot-binaries/v$BUILD_SERIES"
 mkdir -p "$DIST"
 
 if [ "$BUILD_EMULATOR" = "emulationstation" ]; then
@@ -133,20 +148,20 @@ if [ "$BUILD_EMULATOR" = "emulationstation" ]; then
   mkdir -p "$DIST/emulationstation"
   install -m 0755 "$TARGET/usr/bin/emulationstation" "$DIST/emulationstation/emulationstation"
   install -m 0755 "$TARGET/usr/bin/emulationstation-standalone" "$DIST/emulationstation/emulationstation-standalone"
-  tar -C "$DIST/emulationstation" -czf "$DIST/emulationstation-hotr.tar.gz" .
-  sha256sum "$DIST/emulationstation-hotr.tar.gz" > "$DIST/emulationstation-SHA256SUMS"
+  tar -C "$DIST/emulationstation" -czf "$DIST/emulationstation-hotr-v$BUILD_SERIES.tar.gz" .
+  sha256sum "$DIST/emulationstation-hotr-v$BUILD_SERIES.tar.gz" > "$DIST/emulationstation-SHA256SUMS"
   echo "Built native EmulationStation runtime payload:"
-  ls -lh "$DIST/emulationstation-hotr.tar.gz"
+  ls -lh "$DIST/emulationstation-hotr-v$BUILD_SERIES.tar.gz"
   exit 0
 fi
 
 # Keep the other emulator's existing payload when building only one target.
 # Clear just the selected target so stale files cannot remain inside its archive.
 if [ "$BUILD_EMULATOR" = "both" ] || [ "$BUILD_EMULATOR" = "duckstation" ]; then
-  rm -rf "$DIST/duckstation" "$DIST/duckstation-hotr.tar.gz"
+  rm -rf "$DIST/duckstation" "$DIST/duckstation-hotr-v$BUILD_SERIES.tar.gz"
 fi
 if [ "$BUILD_EMULATOR" = "both" ] || [ "$BUILD_EMULATOR" = "pcsx2" ]; then
-  rm -rf "$DIST/pcsx2" "$DIST/pcsx2-hotr.tar.gz"
+  rm -rf "$DIST/pcsx2" "$DIST/pcsx2-hotr-v$BUILD_SERIES.tar.gz"
 fi
 
 # Collect exactly the runtime files the bootstrap installer needs.
@@ -196,13 +211,13 @@ abi_report(){
 }
 if [ "$BUILD_EMULATOR" = "both" ] || [ "$BUILD_EMULATOR" = "duckstation" ]; then
   abi_report "$DIST/duckstation/duckstation-lightgun-qt"
-  tar -C "$DIST/duckstation" -czf "$DIST/duckstation-hotr.tar.gz" .
+  tar -C "$DIST/duckstation" -czf "$DIST/duckstation-hotr-v$BUILD_SERIES.tar.gz" .
 fi
 if [ "$BUILD_EMULATOR" = "both" ] || [ "$BUILD_EMULATOR" = "pcsx2" ]; then
   abi_report "$DIST/pcsx2/pcsx2-lightgun-qt"
-  tar -C "$DIST/pcsx2" -czf "$DIST/pcsx2-hotr.tar.gz" .
+  tar -C "$DIST/pcsx2" -czf "$DIST/pcsx2-hotr-v$BUILD_SERIES.tar.gz" .
 fi
-sha256sum "$DIST"/*-hotr.tar.gz > "$DIST/emulator-SHA256SUMS"
+sha256sum "$DIST"/*-hotr-v"$BUILD_SERIES".tar.gz > "$DIST/emulator-SHA256SUMS"
 
 echo
 echo "Built native Batocera runtime payloads:"

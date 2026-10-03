@@ -1,0 +1,14 @@
+# Copy to buildroot/buildroot.v44.conf and edit. Keep this checkout separate
+# from the v43 checkout so Buildroot caches and ABI-targeted artifacts cannot mix.
+BATOCERA_TREE="$HOME/HOTRBatoceradev/Current/HOTR-Batocera43/buildroot/src/batocera.linux-44"
+BATOCERA_REPO="https://github.com/batocera-linux/batocera.linux.git"
+# Pin this to the exact v44 commit running on the target machine.
+BATOCERA_REF="4f22cafa8b"
+BATOCERA_SERIES="44"
+BATOCERA_TARGET="x86_64"
+AUTO_CLONE_BATOCERA=1
+
+# Patched LightGun fork source trees. The build helper copies them into the
+# checkout, then invokes only their individual Buildroot package targets.
+DUCKSTATION_SOURCE="$HOME/HOTRBatoceradev/Current/duckstation"
+PCSX2_SOURCE="$HOME/HOTRBatoceradev/Current/pcsx2"

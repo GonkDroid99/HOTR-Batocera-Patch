@@ -36,7 +36,7 @@ VER=""
 [ -r /usr/share/batocera/batocera.version ] && VER="$(cat /usr/share/batocera/batocera.version)"
 [ -z "$VER" ] && VER="$(batocera-info 2>/dev/null | head -1 || true)"
 msg "Detected Batocera: ${VER:-unknown}"
-echo "$VER" | grep -Eq '(^|[^0-9])43([.]|[^0-9]|$)' || warn "Designed/tested for Batocera 43/43.1; continuing."
+echo "$VER" | grep -Eq '(^|[^0-9])(43|44)([.]|[^0-9]|$)' || warn "Designed/tested for Batocera 43/44; continuing."
 
 mkdir -p "$HOTR"/{bin,emulators/duckstation,emulators/pcsx2,scripts,software/hook-of-the-reaper,backups,install,tools} \
          "$HOTR_DATA"/{data,defaultLG} /userdata/system/services /userdata/system/configs/emulationstation /userdata/roms/ports /userdata/roms/hotr
