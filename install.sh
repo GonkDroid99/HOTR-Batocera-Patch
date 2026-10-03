@@ -369,22 +369,19 @@ chmod +x /usr/bin/batocera-config-*-hotr /usr/bin/batocera-config-hotr
 chmod +x /usr/bin/hotr-status /usr/bin/hotr-gun-assignment
 cp -a "$BASE/scripts/desktop/"*.desktop /usr/share/applications/
 
-# A matching native EmulationStation package is optional because it must be
-# built for the exact Batocera revision. If the release contains one, install
-# it and retain the stock binary for clean uninstall/rollback.
+# The release must include a matching native EmulationStation package. Retain
+# the stock binaries for clean uninstall/rollback before replacing them.
 NATIVE_ES="$BASE/payload/emulationstation/emulationstation-standalone"
-  [ -x "$NATIVE_ES" ]; then
-  NATIVE_ES_BIN="$BASE/payload/emulationstation/emulationstation"
-  ES_BIN_BACKUP="$HOTR/backups/emulationstation.original"
-  if [ -x "$NATIVE_ES_BIN" ]; then
-    [ -e "$ES_BIN_BACKUP" ] || cp -a /usr/bin/emulationstation "$ES_BIN_BACKUP"
-    install -m 0755 "$NATIVE_ES_BIN" /usr/bin/emulationstation
-  fi
-  ES_BACKUP="$HOTR/backups/emulationstation-standalone.original"
-  [ -e "$ES_BACKUP" ] || cp -a /usr/bin/emulationstation-standalone "$ES_BACKUP"
-  install -m 0755 "$NATIVE_ES" /usr/bin/emulationstation-standalone
-  msg "Native EmulationStation HOTR gun-assignment menu installed."
-fi
+NATIVE_ES_BIN="$BASE/payload/emulationstation/emulationstation"
+[ -x "$NATIVE_ES" ] || die "Native EmulationStation launcher missing from this release."
+[ -x "$NATIVE_ES_BIN" ] || die "Native EmulationStation binary missing from this release."
+ES_BIN_BACKUP="$HOTR/backups/emulationstation.original"
+[ -e "$ES_BIN_BACKUP" ] || cp -a /usr/bin/emulationstation "$ES_BIN_BACKUP"
+install -m 0755 "$NATIVE_ES_BIN" /usr/bin/emulationstation
+ES_BACKUP="$HOTR/backups/emulationstation-standalone.original"
+[ -e "$ES_BACKUP" ] || cp -a /usr/bin/emulationstation-standalone "$ES_BACKUP"
+install -m 0755 "$NATIVE_ES" /usr/bin/emulationstation-standalone
+msg "Native EmulationStation HOTR gun-assignment menu installed."
 
 # Native MAME recoil/output support: output network + MSOP stateoutput + matching HOTR profiles.
 "$BASE/scripts/install-mame-msop.sh" "$BASE"
