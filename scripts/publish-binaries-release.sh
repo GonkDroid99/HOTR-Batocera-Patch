@@ -10,6 +10,14 @@ DUCK="${3:-$BASE/duckstation-hotr-v$SERIES.tar.gz}"
 PCSX2="${4:-$BASE/pcsx2-hotr-v$SERIES.tar.gz}"
 HOTR="${5:-$ROOT/payload/hotr/HookOfTheReaper-x86_64.AppImage}"
 ES="${6:-$BASE/emulationstation-hotr-v$SERIES.tar.gz}"
+# The original v43 outputs predate versioned archive directories. Preserve
+# support for publishing them under the new v43 release-asset names.
+if [ "$SERIES" = 43 ] && [ "$#" -le 2 ] && [ ! -f "$DUCK" ]; then
+  BASE="$ROOT/dist/buildroot-binaries"
+  DUCK="$BASE/duckstation-hotr.tar.gz"
+  PCSX2="$BASE/pcsx2-hotr.tar.gz"
+  ES="$BASE/emulationstation-hotr.tar.gz"
+fi
 [ -f "$DUCK" ] || { echo "ERROR: $DUCK missing" >&2; exit 2; }
 [ -f "$PCSX2" ] || { echo "ERROR: $PCSX2 missing" >&2; exit 2; }
 [ -f "$HOTR" ] || { echo "ERROR: HOTR AppImage missing: $HOTR" >&2; exit 2; }

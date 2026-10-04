@@ -16,6 +16,20 @@ die(){ printf '[HOTR ERROR] %s\n' "$*" >&2; exit 1; }
 [ "$(id -u)" -eq 0 ] || die "Run this installer as root."
 [ "$(uname -m)" = "x86_64" ] || die "This release targets x86_64 only."
 
+# Refuse a versioned package for the wrong Batocera release before touching an
+# existing HOTR install. Old packages without this marker remain supported.
+VER=""
+[ -r /usr/share/batocera/batocera.version ] && VER="$(cat /usr/share/batocera/batocera.version)"
+[ -z "$VER" ] && VER="$(batocera-info 2>/dev/null | head -1 || true)"
+RELEASE_SERIES=""
+[ -r "$BASE/payload/.hotr-batocera-series" ] && RELEASE_SERIES="$(tr -d '[:space:]' < "$BASE/payload/.hotr-batocera-series")"
+case "$VER" in *44*) TARGET_SERIES=44 ;; *43*) TARGET_SERIES=43 ;; *) TARGET_SERIES="" ;; esac
+case "$RELEASE_SERIES" in
+  43|44) [ "$RELEASE_SERIES" = "$TARGET_SERIES" ] || die "This is a Batocera $RELEASE_SERIES package, but this system is ${VER:-unknown}." ;;
+  "") ;;
+  *) die "Invalid release series marker: $RELEASE_SERIES" ;;
+esac
+
 # Cleanly remove an older HOTR integration before replacing files. This keeps
 # stale generators, native EmulationStation backups, and old services from
 # surviving an upgrade. The persistent HOTR data directory is preserved by
@@ -32,9 +46,6 @@ fi
 mkdir -p /userdata/system/logs
 exec > >(tee -a "$LOG") 2>&1
 
-VER=""
-[ -r /usr/share/batocera/batocera.version ] && VER="$(cat /usr/share/batocera/batocera.version)"
-[ -z "$VER" ] && VER="$(batocera-info 2>/dev/null | head -1 || true)"
 msg "Detected Batocera: ${VER:-unknown}"
 echo "$VER" | grep -Eq '(^|[^0-9])(43|44)([.]|[^0-9]|$)' || warn "Designed/tested for Batocera 43/44; continuing."
 
