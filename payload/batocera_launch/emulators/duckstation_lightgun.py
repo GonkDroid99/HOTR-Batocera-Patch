@@ -23,6 +23,11 @@ _SYSTEM: Final = CONFIGS.parent
 _USERDATA: Final = _SYSTEM.parent
 
 
+def _mamehooker_enabled(value: object) -> str:
+    """Treat Batocera's missing/auto value as enabled for HOTR systems."""
+    return 'false' if str(value).strip().lower() in {'0', 'false', 'no', 'off', 'disabled'} else 'true'
+
+
 @cached_dataclass
 class DuckstationLightgun(Duckstation):
     """Stock DuckStation configuration with HOTR's binary and output bridge."""
@@ -75,7 +80,11 @@ class DuckstationLightgun(Duckstation):
                 settings.set('Folders', key, str(value))
         if not settings.has_section('Main'):
             settings.add_section('Main')
-        settings.set('Main', 'EnableMameHooker', self.config.get('duckstation_mamehooker', 'true'))
+        settings.set(
+            'Main',
+            'EnableMameHooker',
+            _mamehooker_enabled(self.config.get('duckstation_mamehooker', 'auto')),
+        )
         with settings_path.open('w') as config_file:
             settings.write(config_file)
 

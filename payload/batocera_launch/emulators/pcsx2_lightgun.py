@@ -16,6 +16,11 @@ _SYSTEM: Final = CONFIGS.parent
 _USERDATA: Final = _SYSTEM.parent
 
 
+def _mamehooker_enabled(value: object) -> str:
+    """Treat Batocera's missing/auto value as enabled for HOTR systems."""
+    return 'false' if str(value).strip().lower() in {'0', 'false', 'no', 'off', 'disabled'} else 'true'
+
+
 @cached_dataclass
 class Pcsx2Lightgun(Pcsx2):
     """Stock PS2 PCSX2 setup with HOTR's binary and private config root."""
@@ -64,6 +69,17 @@ class Pcsx2Lightgun(Pcsx2):
                 'Videos': _USERDATA / 'saves' / 'ps2' / 'pcsx2' / 'videos',
             }.items():
                 settings.set('Folders', key, str(value))
+
+        # HOTR output should be active when EmulationStation leaves the
+        # option at Automatic/default. Only an explicit disabled value turns
+        # it off. The lightgun fork launches MameOutputSender from this flag.
+        if not settings.has_section('EmuCore'):
+            settings.add_section('EmuCore')
+        settings.set(
+            'EmuCore',
+            'EnableMameHooker',
+            _mamehooker_enabled(self.config.get('pcsx2_mamehooker', 'auto')),
+        )
 
         # The stock writer targets its own resource tree for GunCon cursors
         # and fog fixes. This independent build must use its bundled assets.
