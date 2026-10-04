@@ -5,12 +5,24 @@
 set -euo pipefail
 
 REPO="GonkDroid99/HOTR-Batocera-Patch"
-ASSET_REGEX='^HOTR-Batocera43-x86_64\.zip$'
+VER="$(cat /usr/share/batocera/batocera.version 2>/dev/null || true)"
+[ -n "$VER" ] || VER="$(batocera-info 2>/dev/null | head -1 || true)"
+case "$VER" in
+  *44*)
+    SERIES=44
+    ASSET_REGEX='^HOTR-Batocera44-x86_64\.zip$'
+    ;;
+  *)
+    SERIES=43
+    ASSET_REGEX='^HOTR-Batocera43-x86_64\.zip$'
+    ;;
+esac
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 echo "HOTR Batocera bootstrap"
 echo "Repository: $REPO"
+echo "Detected Batocera: ${VER:-unknown}; selecting v$SERIES installer"
 
 python3 - "$REPO" "$ASSET_REGEX" "$TMP/hotr.zip" <<'PY'
 import json, re, sys, urllib.request
