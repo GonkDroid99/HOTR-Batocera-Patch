@@ -137,7 +137,7 @@ install_pcsx2_from_tree(){
   [ -n "$bin" ] || return 1
   rm -rf "$HOTR/emulators/pcsx2"/*
   cp -a "$(dirname "$bin")"/. "$HOTR/emulators/pcsx2/"
-  [ -f "$HOTR/emulators/pcsx2/MameOutputSender" ] || cp -a "$BASE/payload/emulators/pcsx2/MameOutputSender" "$HOTR/emulators/pcsx2/MameOutputSender"
+  cp -a "$BASE/payload/emulators/pcsx2/MameOutputSender" "$HOTR/emulators/pcsx2/MameOutputSender"
   chmod +x "$HOTR/emulators/pcsx2/pcsx2-lightgun-qt" "$HOTR/emulators/pcsx2/MameOutputSender"
   msg "PCSX2 HOTR native Batocera build installed."
 }
