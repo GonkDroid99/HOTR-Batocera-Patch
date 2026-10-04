@@ -88,6 +88,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          ARCHIVE_DIR="dist/buildroot-binaries/v${{ matrix.series }}"
+          mkdir -p "$ARCHIVE_DIR"
+          cp "$RUNNER_TEMP/hotr-binaries/duckstation-hotr-v${{ matrix.series }}.tar.gz" "$ARCHIVE_DIR/"
+          cp "$RUNNER_TEMP/hotr-binaries/pcsx2-hotr-v${{ matrix.series }}.tar.gz" "$ARCHIVE_DIR/"
+          cp "$RUNNER_TEMP/hotr-binaries/emulationstation-hotr-v${{ matrix.series }}.tar.gz" "$ARCHIVE_DIR/"
+
           rm -rf payload/emulators/pcsx2/*
           mkdir -p payload/emulators/pcsx2/resources
           curl -fsSL --retry 3 \
