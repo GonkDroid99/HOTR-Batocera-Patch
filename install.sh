@@ -380,19 +380,23 @@ chmod +x /usr/bin/batocera-config-*-hotr /usr/bin/batocera-config-hotr
 chmod +x /usr/bin/hotr-status /usr/bin/hotr-gun-assignment
 cp -a "$BASE/scripts/desktop/"*.desktop /usr/share/applications/
 
-# The release must include a matching native EmulationStation package. Retain
-# the stock binaries for clean uninstall/rollback before replacing them.
+# The release must include a matching native EmulationStation package. The
+# main binary is too large for Batocera's persistent overlay, so retain it in
+# /userdata and put only tiny launch wrappers in /usr/bin.
 NATIVE_ES="$BASE/payload/emulationstation/emulationstation-standalone"
 NATIVE_ES_BIN="$BASE/payload/emulationstation/emulationstation"
 [ -x "$NATIVE_ES" ] || die "Native EmulationStation launcher missing from this release."
 [ -x "$NATIVE_ES_BIN" ] || die "Native EmulationStation binary missing from this release."
 ES_BIN_BACKUP="$HOTR/backups/emulationstation.original"
 [ -e "$ES_BIN_BACKUP" ] || cp -a /usr/bin/emulationstation "$ES_BIN_BACKUP"
-install -m 0755 "$NATIVE_ES_BIN" /usr/bin/emulationstation
 ES_BACKUP="$HOTR/backups/emulationstation-standalone.original"
 [ -e "$ES_BACKUP" ] || cp -a /usr/bin/emulationstation-standalone "$ES_BACKUP"
-install -m 0755 "$NATIVE_ES" /usr/bin/emulationstation-standalone
-msg "Native EmulationStation HOTR gun-assignment menu installed."
+install -m 0755 "$NATIVE_ES_BIN" "$HOTR/bin/emulationstation"
+install -m 0755 "$NATIVE_ES" "$HOTR/bin/emulationstation-standalone"
+printf '%s\n' '#!/bin/sh' 'exec /userdata/system/hotr/bin/emulationstation "$@"' > /usr/bin/emulationstation
+printf '%s\n' '#!/bin/sh' 'exec /userdata/system/hotr/bin/emulationstation-standalone "$@"' > /usr/bin/emulationstation-standalone
+chmod 0755 /usr/bin/emulationstation /usr/bin/emulationstation-standalone
+msg "Native EmulationStation HOTR gun-assignment menu installed from /userdata."
 
 # Native MAME recoil/output support: output network + MSOP stateoutput + matching HOTR profiles.
 "$BASE/scripts/install-mame-msop.sh" "$BASE"
