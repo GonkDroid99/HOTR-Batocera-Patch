@@ -6,6 +6,7 @@ MODE="${1:---auto}"
 HOTR=/userdata/system/hotr
 HOTR_DATA=/userdata/system/hook-of-the-reaper
 SINDEN_ENABLE_FILE="$HOTR/sinden-tcp.enabled"
+SINDEN_PTY_BRIDGE_FILE="$HOTR/sinden-pty-bridge.enabled"
 LOG=/userdata/system/logs/hotr-install.log
 GENROOT="$(printf '%s\n' /usr/lib/python*/site-packages/configgen/generators | sort -V | while read -r candidate; do [ -d "$candidate" ] && printf '%s\n' "$candidate"; done | tail -n1)"
 
@@ -13,8 +14,89 @@ msg(){ printf '[HOTR] %s\n' "$*"; }
 warn(){ printf '[HOTR WARNING] %s\n' "$*" >&2; }
 die(){ printf '[HOTR ERROR] %s\n' "$*" >&2; exit 1; }
 
-[ "$(id -u)" -eq 0 ] || die "Run this installer as root."
-[ "$(uname -m)" = "x86_64" ] || die "This release targets x86_64 only."
+# Copy a directory tree without clobbering anything that is already there.
+# Game files are user-editable content: a release must add the ones a machine is
+# missing and leave existing ones alone (an operator may have tuned them, and a
+# newer HOTR build ships its own set).
+copy_missing_tree(){
+  local src="$1" dst="$2"
+  [ -d "$src" ] || return 0
+  mkdir -p "$dst"
+  if command -v rsync >/dev/null 2>&1; then
+    rsync -a --ignore-existing "$src"/ "$dst"/ && return 0
+  fi
+  ( cd "$src" && find . -type d -exec mkdir -p "$dst/{}" \; ) || true
+  ( cd "$src" && find . -type f ! -exec test -e "$dst/{}" \; -exec cp -a {} "$dst/{}" \; ) || true
+}
+
+# A Sinden gun that HOTR drives in ammo mode (its default recoil priority for a
+# Sinden) can only recoil through the gun's own trigger recoil, which HOTR arms
+# solely from the game file option Sinden_Trigger_Recoil. Add it to every
+# ammo-mode game file that lacks it; the tool is idempotent and preserves each
+# file's mix of line endings. Call this only after every step that writes game
+# files - install-mame-msop.sh ships its own MAME copies - and verify the
+# result: a game file that lost the option again is invisible until the gun
+# simply does not kick.
+configure_sinden_trigger_recoil(){
+  local tool="$BASE/payload/system/hotr-sinden-trigger-recoil" summary
+  if ! command -v python3 >/dev/null 2>&1; then
+    warn "python3 is missing; Sinden trigger recoil was not configured in the game files."
+    return 0
+  fi
+  if summary="$(python3 "$BASE/payload/system/hotr-sinden-trigger-recoil" --dir "$HOTR_DATA/defaultLG")"; then
+    msg "Sinden trigger recoil in game files: $summary"
+  else
+    warn "Could not configure Sinden trigger recoil in the game files; run hotr-sinden-trigger-recoil to retry."
+    return 0
+  fi
+  summary="$(python3 "$tool" --dir "$HOTR_DATA/defaultLG" --check --quiet)" && return 0
+  warn "Game files still lacked the option after patching ($summary); retrying."
+  python3 "$tool" --dir "$HOTR_DATA/defaultLG" >/dev/null || true
+  if summary="$(python3 "$tool" --dir "$HOTR_DATA/defaultLG" --check --quiet)"; then
+    msg "Sinden trigger recoil verified in game files: $summary"
+  else
+    warn "Ammo-mode game files still lack Sinden_Trigger_Recoil ($summary); run hotr-sinden-trigger-recoil."
+  fi
+}
+
+# Fail fast with a readable message when the machine cannot run this
+# installer. A missing tool used to surface much later (a failed download or an
+# extraction error). This runs before the upgrade cleanup, so a broken
+# precondition never removes a working install.
+preflight(){
+  [ "$(id -u)" -eq 0 ] || die "Run this installer as root."
+  [ "$(uname -m)" = "x86_64" ] || die "This release targets x86_64 only."
+
+  # python3 does the downloads and the config edits, tee duplicates the install
+  # log, unzip validates patches.zip; tar is only needed for the emulator
+  # archives, which --infrastructure-only does not install.
+  local required="python3 tee unzip" tool optional="" missing=""
+  case "$MODE" in
+    --infrastructure-only) optional="tar" ;;
+    *) required="$required tar" ;;
+  esac
+  for tool in $required; do
+    command -v "$tool" >/dev/null 2>&1 || missing="$missing $tool"
+  done
+  [ -z "$missing" ] || die "Missing required tool(s):$missing These ship with Batocera; repair the system image and re-run."
+  for tool in rsync start-stop-daemon setsid batocera-save-overlay $optional; do
+    command -v "$tool" >/dev/null 2>&1 || warn "Optional tool '$tool' is missing; the parts that use it fall back or are skipped."
+  done
+
+  [ -w /userdata ] || die "/userdata is not writable."
+  local free_kb required_kb=1048576 warn_kb=2097152
+  if [ "$MODE" = "--infrastructure-only" ]; then
+    required_kb=307200
+    warn_kb=786432
+  fi
+  free_kb="$(df -Pk /userdata 2>/dev/null | awk 'NR==2 {print $4}')"
+  free_kb="${free_kb:-0}"
+  [ "$free_kb" -ge "$required_kb" ] || die "/userdata has $((free_kb / 1024)) MiB free; this install needs at least $((required_kb / 1024)) MiB."
+  [ "$free_kb" -ge "$warn_kb" ] || warn "/userdata has only $((free_kb / 1024)) MiB free; a later update or emulator install may run out of space."
+  msg "Preflight OK: x86_64, required tools present, $((free_kb / 1024)) MiB free on /userdata."
+}
+
+preflight
 
 # Refuse a versioned package for the wrong Batocera release before touching an
 # existing HOTR install. Old packages without this marker remain supported.
@@ -99,6 +181,26 @@ configure_sinden_tcp() {
 }
 
 configure_sinden_tcp
+
+# The PTY/worker bridge is retired (it is what made the gun stop aiming), but it
+# stays available for troubleshooting guns the direct backend cannot drive.
+configure_sinden_pty_bridge() {
+  case "${HOTR_SINDEN_PTY_BRIDGE:-}" in
+    1|yes|YES|true|TRUE|on|ON)
+      touch "$SINDEN_PTY_BRIDGE_FILE"
+      msg "Sinden PTY bridge enabled (legacy; the direct backend is preferred)."
+      ;;
+    0|no|NO|false|FALSE|off|OFF)
+      rm -f "$SINDEN_PTY_BRIDGE_FILE"
+      msg "Sinden PTY bridge disabled; guns are written directly."
+      ;;
+    *)
+      # Keep whatever the previous install chose; the default is off.
+      ;;
+  esac
+}
+
+configure_sinden_pty_bridge
 
 extract_any(){
   local file="$1" dest="$2"; mkdir -p "$dest"
@@ -226,15 +328,31 @@ fi
 for profile in alienUSB.hor blamcon.hor customUSB.hor fusion.hor iniDefault.hor jbgun4ir.hor lgDefault.hor mx24.hor nonDefaultLG.hor openFire.hor rs3Reaper.hor sinden.hor xGunner.hor xenas.hor; do
   [ -f "$BASE/payload/hotr/data/$profile" ] && cp -a "$BASE/payload/hotr/data/$profile" "$HOTR_DATA/data/$profile"
 done
-# Game profiles are versioned content and should receive release updates.
-cp -a "$BASE/payload/hotr/defaultLG"/. "$HOTR_DATA/defaultLG/"
+# Game profiles: add-only, so a release never overwrites a game file this
+# machine already has.
+copy_missing_tree "$BASE/payload/hotr/defaultLG" "$HOTR_DATA/defaultLG"
+# The Sinden trigger-recoil option is added at the end of the install, after
+# install-mame-msop.sh, which writes its own copies of the MAME game files:
+# see configure_sinden_trigger_recoil().
 rm -rf "$HOTR/software/hook-of-the-reaper/data" "$HOTR/software/hook-of-the-reaper/defaultLG"
 ln -s "$HOTR_DATA/data" "$HOTR/software/hook-of-the-reaper/data"
 ln -s "$HOTR_DATA/defaultLG" "$HOTR/software/hook-of-the-reaper/defaultLG"
 
 # Userdata scripts/config.
 cp -a "$BASE/payload/system/hotr-sinden-broker.py" "$HOTR/bin/hotr-sinden-broker.py"
-cp -a "$BASE/payload/system/hotr-sinden-worker-launch" "$HOTR/bin/hotr-sinden-worker-launch"
+cp -a "$BASE/payload/system/hotr-sinden-trigger-recoil" "$HOTR/bin/hotr-sinden-trigger-recoil"
+chmod +x "$HOTR/bin/hotr-sinden-trigger-recoil"
+# Operator tools: a read-only report (with an opt-in one-frame fire test) and a
+# kill switch. They live next to the broker so they can import it directly.
+cp -a "$BASE/scripts/hotr-sinden-check" "$HOTR/bin/hotr-sinden-check"
+cp -a "$BASE/scripts/hotr-sinden-disable" "$HOTR/bin/hotr-sinden-disable"
+# The worker launcher belongs to the retired PTY bridge; ship it only for the
+# explicit opt-in so a default install carries no worker/PTY path at all.
+if [ -f "$SINDEN_PTY_BRIDGE_FILE" ]; then
+  cp -a "$BASE/payload/system/hotr-sinden-worker-launch" "$HOTR/bin/hotr-sinden-worker-launch"
+else
+  rm -f "$HOTR/bin/hotr-sinden-worker-launch"
+fi
 cp -a "$BASE/scripts/hotr-configgen-launch" "$BASE/scripts/add-emulator-config.sh" \
   "$BASE/scripts/hotr-theme-sync" "$HOTR/bin/"
 cp -a "$BASE/payload/hotr/emulationstation" "$HOTR/"
@@ -271,15 +389,22 @@ cp -a "$BASE/installer.conf" "$HOTR/install/installer.conf"
 cp -a "$BASE/uninstall.sh" "$BASE/update.sh" "$BASE/check-install.sh" \
   "$BASE/scripts/hotr-debug-report.sh" "$BASE/scripts/hotr-status" \
   "$BASE/scripts/tests/hotr-sinden-full-selftest.sh" \
+  "$BASE/scripts/tests/hotr-sinden-fakegun-selftest.sh" \
+  "$BASE/scripts/tests/hotr-sinden-tools-selftest.sh" \
+  "$BASE/scripts/tests/hotr-sinden-broker-selftest.sh" \
+  "$BASE/scripts/tests/hotr-sinden-worker-selftest.sh" \
+  "$BASE/scripts/tests/fake-gun-firmware-faithful.py" \
+  "$BASE/scripts/tests/hotr-sinden-lab-mono.sh" \
   "$BASE/scripts/tests/hotr-sinden-native-helper-selftest.py" \
   "$BASE/scripts/patch-batocera-sinden-hotr.sh" "$HOTR/tools/"
 chmod +x "$HOTR/tools/"*.sh "$HOTR/tools/"*.py "$HOTR/bin/"* "$HOTR/scripts/"*.sh /userdata/system/services/hotr
 
-# This changes only the stock Sinden helper's SerialPortWrite value so Mono
-# uses the worker PTY. The physical tty remains owned by the worker. It is
-# independent of scripts/patch-batocera-sinden.sh (the optional 43 detection
-# workaround).
-if [ -f "$SINDEN_ENABLE_FILE" ]; then
+# Option A never patches the stock helper: LightgunMono keeps the real tty, the
+# broker writes that tty write-only, and the aim/camera handshake is untouched.
+# An install upgrading from an older release may still carry the retired worker
+# patch; remove it here. The legacy bridge needs both the broker and the
+# explicit opt-in.
+if [ -f "$SINDEN_ENABLE_FILE" ] && [ -f "$SINDEN_PTY_BRIDGE_FILE" ]; then
   "$HOTR/tools/patch-batocera-sinden-hotr.sh" apply
 else
   "$HOTR/tools/patch-batocera-sinden-hotr.sh" remove
@@ -375,9 +500,13 @@ mkdir -p /userdata/system/configs/duckstation-lightgun \
 mkdir -p /usr/share/applications /usr/bin
 cp -a "$BASE/scripts/batocera-config-duckstation-hotr" "$BASE/scripts/batocera-config-pcsx2-hotr" "$BASE/scripts/batocera-config-hotr" /usr/bin/
 cp -a "$BASE/scripts/hotr-status" /usr/bin/hotr-status
+cp -a "$BASE/scripts/hotr-sinden-check" /usr/bin/hotr-sinden-check
+cp -a "$BASE/scripts/hotr-sinden-disable" /usr/bin/hotr-sinden-disable
+cp -a "$BASE/payload/system/hotr-sinden-trigger-recoil" /usr/bin/hotr-sinden-trigger-recoil
 cp -a "$BASE/scripts/hotr-gun-assignment" /usr/bin/hotr-gun-assignment
 chmod +x /usr/bin/batocera-config-*-hotr /usr/bin/batocera-config-hotr
 chmod +x /usr/bin/hotr-status /usr/bin/hotr-gun-assignment
+chmod +x /usr/bin/hotr-sinden-check /usr/bin/hotr-sinden-disable /usr/bin/hotr-sinden-trigger-recoil
 cp -a "$BASE/scripts/desktop/"*.desktop /usr/share/applications/
 
 # The release must include a matching native EmulationStation package. The
@@ -401,6 +530,11 @@ msg "Native EmulationStation HOTR gun-assignment menu installed from /userdata."
 # Native MAME recoil/output support: output network + MSOP stateoutput + matching HOTR profiles.
 "$BASE/scripts/install-mame-msop.sh" "$BASE"
 
+# Must run after the MSOP step: that archive ships its own HOTR game files for
+# the MAME light-gun games (area51, timecris, vcop, ...), which overwrite the
+# machine's copies and would otherwise silently drop the option again.
+configure_sinden_trigger_recoil
+
 udevadm control --reload-rules 2>/dev/null || true
 udevadm trigger 2>/dev/null || true
 command -v batocera-save-overlay >/dev/null || die "batocera-save-overlay not found."
@@ -411,6 +545,9 @@ if command -v batocera-services >/dev/null; then batocera-services enable hotr |
 /userdata/system/services/hotr restart || true
 
 msg "Installation complete."
+if [ -f "$SINDEN_ENABLE_FILE" ]; then
+  msg "Sinden recoil is enabled; run hotr-sinden-check (add --fire to pulse one recoil), or hotr-sinden-disable to switch it off."
+fi
 [ -x "$HOTR/emulators/duckstation/duckstation-lightgun-qt" ] || warn "DuckStation HOTR binary is missing."
 [ -x "$HOTR/emulators/pcsx2/pcsx2-lightgun-qt" ] || warn "PCSX2 HOTR native binary is missing."
 msg "Restart EmulationStation or reboot. Systems: PlayStation HOTR and PlayStation 2 HOTR."

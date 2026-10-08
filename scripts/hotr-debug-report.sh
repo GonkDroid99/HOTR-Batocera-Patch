@@ -3,6 +3,7 @@
 set -u
 
 ROOT=/userdata/system/hotr
+SINDEN_STATE="$ROOT/sinden-broker-state.json"
 LOGROOT=/userdata/system/logs/hotr-debug
 STATE="$LOGROOT/current"
 SERVICE=/userdata/system/services/hotr
@@ -54,6 +55,61 @@ autoconfig_summary(){
   fi
 }
 
+sinden_summary(){
+  local tracker found=0
+  echo "Broker state file: $SINDEN_STATE"
+  if [ -f "$SINDEN_STATE" ]; then
+    python3 - "$SINDEN_STATE" <<'PY'
+import json
+import sys
+
+try:
+    with open(sys.argv[1], encoding="utf-8") as stream:
+        state = json.load(stream)
+except (OSError, ValueError) as exc:
+    print(f"  unreadable: {exc}")
+    raise SystemExit(0)
+
+players = state.get("players") or {}
+print(f"  updated={state.get('updated')} pid={state.get('pid')} control-socket={state.get('control_socket')}")
+if not players:
+    print("  no player channel is configured")
+for player, data in sorted(players.items()):
+    print(
+        "  player {}: backend={} device={} usb={} tracker_ready={} worker={}".format(
+            player,
+            data.get("backend"),
+            data.get("device") or "none",
+            data.get("usb_id") or "unknown",
+            data.get("tracker_ready"),
+            data.get("worker"),
+        )
+    )
+    print(
+        "    sent={} dropped={} refused={} reply-bytes={}".format(
+            data.get("sent"), data.get("dropped"), data.get("refused"), data.get("reply_bytes")
+        )
+    )
+    if data.get("last_frame"):
+        print(f"    last frame: {data['last_frame']} ({data.get('last_reason')})")
+    if data.get("last_reply"):
+        print(f"    last gun reply read by the legacy bridge: {data['last_reply']}")
+    if data.get("last_refusal"):
+        print(f"    last refused frame: {data['last_refusal']}")
+PY
+  else
+    echo '  state file missing (the broker is stopped or could not write it)'
+  fi
+  echo 'LightgunMono tracker configs (SerialPortWrite names the tty each player uses):'
+  for tracker in /var/run/sinden/p*/LightgunMono-*.exe.config; do
+    [ -f "$tracker" ] || continue
+    found=1
+    printf '  %s -> ' "$tracker"
+    grep -o 'key="SerialPortWrite"[^/]*' "$tracker" 2>/dev/null | head -n 1 || true
+  done
+  [ "$found" -eq 1 ] || echo '  none found (LightgunMono is not running)'
+}
+
 hotr_pids(){
   local p pid line
   for p in /proc/[0-9]*; do
@@ -87,7 +143,9 @@ collect_report(){
     cmd tail -n 120 /userdata/system/logs/hook-of-the-reaper.log
     section 'Sinden broker log'
     cmd tail -n 120 /userdata/system/logs/hotr-sinden-broker.log
-    section 'Sinden broker workers'
+    section 'Sinden recoil state'
+    sinden_summary
+    section 'Sinden broker workers (legacy bridge only)'
     cmd ls -la /var/run/hotr-sinden
     cmd cat /userdata/system/hotr/sinden-player-map
     cmd sed -n '1,80p' /usr/bin/virtual-sindenlightgun-add
@@ -160,6 +218,28 @@ collect_report(){
         /userdata/system/logs/hotr-game-launch.log \
         /userdata/system/logs/hotr-sinden-broker.log 2>/dev/null; then
       echo 'POSSIBLE ISSUE: A serial device may already be in use by another process.'
+    fi
+    if [ -f "$SINDEN_STATE" ]; then
+      python3 - "$SINDEN_STATE" <<'PY'
+import json
+import sys
+
+try:
+    with open(sys.argv[1], encoding="utf-8") as stream:
+        players = json.load(stream).get("players") or {}
+except (OSError, ValueError):
+    players = {}
+for player, data in sorted(players.items()):
+    if not data.get("device"):
+        print(f"POSSIBLE ISSUE: Sinden player {player} has no device; recoil frames are dropped.")
+    if data.get("reply_bytes"):
+        print(
+            f"POSSIBLE ISSUE: Sinden player {player} forwarded {data['reply_bytes']} gun reply byte(s) "
+            "into LightgunMono's PTY; retire the legacy bridge."
+        )
+    if data.get("refused"):
+        print(f"POSSIBLE ISSUE: Sinden player {player} had {data['refused']} frame(s) refused by the HOTR safety chokepoint.")
+PY
     fi
     if ! grep -q 'POSSIBLE ISSUE' "$REPORT"; then
       echo 'No obvious HOTR serial, HID, process, or access errors were detected.'

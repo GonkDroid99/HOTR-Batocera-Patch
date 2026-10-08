@@ -1,0 +1,454 @@
+#!/usr/bin/env python3
+"""Read-only Sinden recoil report for HOTR Batocera installations.
+
+The default mode never writes anything: it reports what is installed, which guns
+the USB ids resolve to, whether LightgunMono has opened a port, and what the
+running broker has counted (frames sent, dropped, refused, gun reply bytes).
+
+``--fire`` is the only mode that moves the gun. It sends exactly one whitelisted
+frame (``A`` = A8, a single recoil pulse) through the installed broker's TCP port
+so the whole chain can be exercised on demand, then re-reads the broker's state
+file to show whether the frame was delivered or dropped.
+
+Exit status: 0 when nothing failed, 1 when at least one check failed, 2 for a
+usage error.
+"""
+from __future__ import annotations
+
+import argparse
+import importlib.util
+import json
+import logging
+import os
+import socket
+import sys
+import time
+from pathlib import Path
+from types import ModuleType
+
+HOTR_ROOT = Path(os.environ.get("HOTR_ROOT", "/userdata/system/hotr"))
+ENABLE_FILE = HOTR_ROOT / "sinden-tcp.enabled"
+PTY_BRIDGE_FILE = HOTR_ROOT / "sinden-pty-bridge.enabled"
+DEVICES_FILE = HOTR_ROOT / "sinden-devices.conf"
+PID_FILE = Path(os.environ.get("HOTR_SINDEN_PID_FILE", "/var/run/hotr-sinden-broker.pid"))
+RUN_DIR = Path(os.environ.get("HOTR_SINDEN_RUN_DIR", "/var/run/hotr-sinden"))
+BROKER_LOG = Path(os.environ.get("HOTR_SINDEN_LOG", "/userdata/system/logs/hotr-sinden-broker.log"))
+DATA_CONFIG = Path(os.environ.get("HOTR_SINDEN_CONFIG", "/userdata/system/hook-of-the-reaper/data/lightguns.hor"))
+DEFAULT_TCP_PORT = 13000
+STATE_STALE_SECONDS = 15.0
+FIRE_TIMEOUT_SECONDS = 5.0
+
+OK = "OK"
+WARN = "WARN"
+FAIL = "FAIL"
+INFO = "INFO"
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Report Sinden gun, broker and LightgunMono state (read-only).",
+    )
+    parser.add_argument(
+        "--fire",
+        action="store_true",
+        help="send one safe recoil frame (A8) through the broker; the only writing mode",
+    )
+    parser.add_argument("--player", choices=("1", "2"), default="1", help="player for --fire")
+    parser.add_argument("--port", type=int, help=f"broker TCP port for --fire (default {DEFAULT_TCP_PORT} or lightguns.hor)")
+    parser.add_argument("--config", type=Path, default=DATA_CONFIG, help="HOTR lightguns.hor data file")
+    parser.add_argument("--state-file", type=Path, help="broker state file (default next to the broker)")
+    parser.add_argument("--dev-root", type=Path, help="directory to scan for ttyACM* guns (default /dev)")
+    parser.add_argument("--tracker-root", type=Path, help="LightgunMono runtime config directory")
+    parser.add_argument("--broker", type=Path, help="path to hotr-sinden-broker.py")
+    parser.add_argument("--json", action="store_true", help="print the report as JSON")
+    return parser.parse_args()
+
+
+def broker_path(explicit: Path | None) -> Path:
+    candidates = []
+    if explicit is not None:
+        candidates.append(explicit)
+    here = Path(__file__).resolve()
+    # $HOTR/bin next to the tool, the install root, then the repository tree.
+    candidates.append(here.with_name("hotr-sinden-broker.py"))
+    candidates.append(HOTR_ROOT / "bin" / "hotr-sinden-broker.py")
+    candidates.append(here.parent.parent / "payload" / "system" / "hotr-sinden-broker.py")
+    candidates.append(here.parent / "payload" / "system" / "hotr-sinden-broker.py")
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    raise SystemExit(f"[FAIL] hotr-sinden-broker.py not found (tried {', '.join(str(item) for item in candidates)})")
+
+
+def load_broker(path: Path) -> ModuleType:
+    """Import the installed broker so the report uses the same identity rules."""
+    spec = importlib.util.spec_from_file_location("hotr_sinden_broker_check", path)
+    if spec is None or spec.loader is None:
+        raise SystemExit(f"[FAIL] cannot load the broker module {path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module  # dataclasses needs the module registered
+    spec.loader.exec_module(module)
+    return module
+
+
+def read_pid(path: Path = PID_FILE) -> int | None:
+    try:
+        text = path.read_text(encoding="ascii").strip()
+    except OSError:
+        return None
+    try:
+        return int(text)
+    except ValueError:
+        return None
+
+
+def alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def read_state(path: Path) -> dict:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def state_age_seconds(state: dict, now: float) -> float | None:
+    stamp = state.get("updated")
+    if not isinstance(stamp, str):
+        return None
+    try:
+        parsed = time.mktime(time.strptime(stamp, "%Y-%m-%dT%H:%M:%S"))
+    except ValueError:
+        return None
+    return max(now - parsed, 0.0)
+
+
+def check(level: str, message: str) -> dict:
+    return {"level": level, "message": message}
+
+
+def read_device_overrides(path: Path = DEVICES_FILE) -> dict[str, str]:
+    """Read the optional PLAYER=/dev/path override used by hotr-service."""
+    overrides: dict[str, str] = {}
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return overrides
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        player, device = line.split("=", 1)
+        overrides[player.strip()] = device.strip()
+    return overrides
+
+
+def collect(args: argparse.Namespace, broker: ModuleType) -> dict:
+    now = time.time()
+    tracker_root = args.tracker_root or broker.TRACKER_ROOT
+    state_file = args.state_file or broker.DEFAULT_STATE_FILE
+    report: dict = {
+        "broker": {
+            "enabled": ENABLE_FILE.is_file(),
+            "bridge_enabled": PTY_BRIDGE_FILE.is_file(),
+            "pid_file": str(PID_FILE),
+            "pid": None,
+            "running": False,
+            "log": str(BROKER_LOG),
+            "state_file": str(state_file),
+            "state_written": None,
+            "state_age": None,
+        },
+        "config": {"path": str(args.config), "ports": {}, "players": []},
+        "devices": {},
+        "players": {},
+        "tracker": {},
+        "state": {},
+        "checks": [],
+    }
+
+    pid = read_pid()
+    report["broker"]["pid"] = pid
+    report["broker"]["running"] = pid is not None and alive(pid)
+
+    ports = broker.configured_ports(args.config) if args.config.is_file() else {}
+    report["config"]["ports"] = {str(port): sorted(players) for port, players in sorted(ports.items())}
+    configured_players = sorted({player for players in ports.values() for player in players})
+
+    devices = {}
+    dev_root = args.dev_root or broker.DEV_ROOT
+    for entry in sorted(dev_root.glob("ttyACM*")):
+        device = str(entry)
+        usb = broker.usb_id_of(device)
+        devices[device] = usb
+        report["players"].setdefault(broker.SINDEN_USB_IDS.get(usb or "", ""), device)
+    overrides = read_device_overrides()
+    report["overrides"] = overrides
+    for player, device in sorted(overrides.items()):
+        report["players"][player] = device
+    report["devices"] = devices
+    report["players"] = {player: device for player, device in report["players"].items() if player}
+    report["config"]["players"] = configured_players
+    expected_players = configured_players or sorted(broker.SINDEN_USB_IDS.values())
+    for player in expected_players:
+        report["players"].setdefault(player, None)
+
+    report["tracker"] = broker.tracker_write_ports(tracker_root)
+
+    state = read_state(state_file)
+    report["state"] = state.get("players", {}) if isinstance(state.get("players"), dict) else {}
+    stamp = state.get("updated")
+    report["broker"]["state_written"] = stamp if isinstance(stamp, str) else None
+    report["broker"]["state_age"] = state_age_seconds(state, now)
+
+    checks: list[dict] = report["checks"]
+    if not report["broker"]["enabled"]:
+        checks.append(check(INFO, f"Sinden recoil is disabled (no {ENABLE_FILE}); enable it with HOTR_SINDEN_TCP=1 install or by creating that file."))
+    elif not report["broker"]["running"]:
+        checks.append(check(FAIL, "the broker is enabled but not running: start it with /userdata/system/services/hotr start or reboot."))
+    else:
+        checks.append(check(OK, f"broker is running (PID {pid})"))
+
+    if report["broker"]["bridge_enabled"]:
+        checks.append(check(WARN, f"the legacy PTY bridge opt-in is in place ({PTY_BRIDGE_FILE}); the direct backend is preferred."))
+
+    if report["broker"]["running"]:
+        age = report["broker"]["state_age"]
+        if not report["state"]:
+            checks.append(check(FAIL, f"the broker is running but has not published {state_file}"))
+        elif age is None or age > STATE_STALE_SECONDS:
+            checks.append(check(FAIL, f"the broker state file is stale ({age!s} s old): the broker may be wedged"))
+        else:
+            checks.append(check(OK, f"the broker state file is fresh ({age:.0f} s old)"))
+
+    known = {usb for usb in devices.values() if usb in broker.SINDEN_USB_IDS}
+    unknown = sorted({usb for usb in devices.values() if usb and usb not in broker.SINDEN_USB_IDS})
+    for player, device in sorted(overrides.items()):
+        if Path(device).exists():
+            checks.append(check(OK, f"player {player}: using the {DEVICES_FILE.name} override {device}"))
+        else:
+            checks.append(check(FAIL, f"player {player}: {DEVICES_FILE.name} points at {device}, which does not exist"))
+    if not devices:
+        if overrides:
+            checks.append(check(INFO, f"no gun on {dev_root}/ttyACM*; the {DEVICES_FILE.name} override supplies " + ", ".join(f"player {player}={device}" for player, device in sorted(overrides.items()))))
+        elif report["broker"]["enabled"]:
+            checks.append(check(FAIL, f"no Sinden gun found on {dev_root}/ttyACM* (USB ids {', '.join(broker.SINDEN_USB_IDS)})"))
+    else:
+        checks.append(check(OK, f"found {len(devices)} Sinden port(s): " + ", ".join(f"{device} (USB {usb})" for device, usb in devices.items())))
+    if unknown:
+        checks.append(check(WARN, f"unknown Sinden USB id(s) on {dev_root}: {', '.join(unknown)}"))
+
+    for player in expected_players:
+        device = report["players"].get(player)
+        state_player = (report["state"].get("players") or {}).get(player) or {}
+        gated = state_player.get("tracker_gate", True)
+        if device:
+            config = report["tracker"].get(broker.canonical_tty(device))
+            if config:
+                checks.append(check(OK, f"player {player}: {device} is open in LightgunMono ({config})"))
+            elif not gated:
+                checks.append(check(INFO, f"player {player}: {device} is not gated on LightgunMono; recoil flows without it"))
+            else:
+                checks.append(check(WARN, f"player {player}: LightgunMono has not opened {device} yet; recoil is dropped until it does (normal outside a game)."))
+        elif devices:
+            where = ", ".join(str(port) for port, players in ports.items() if player in players)
+            suffix = f" (configured on port(s) {where})" if where else ""
+            checks.append(check(WARN, f"player {player}: no gun is attached{suffix}"))
+        elif report["broker"]["enabled"]:
+            checks.append(check(FAIL, f"player {player}: no gun found for this player"))
+
+    for player, counters in sorted(report["state"].items()):
+        counters = counters if isinstance(counters, dict) else {}
+        backend = counters.get("backend", "unknown")
+        if counters.get("reply_bytes"):
+            checks.append(check(FAIL, f"player {player}: {counters['reply_bytes']} gun reply byte(s) reached LightgunMono's PTY; retire the legacy bridge."))
+        if counters.get("refused"):
+            checks.append(check(WARN, f"player {player}: {counters['refused']} frame(s) refused by the safety chokepoint ({counters.get('last_refusal')})"))
+        if backend == "bridge" or counters.get("worker"):
+            checks.append(check(WARN, f"player {player}: running the legacy byte-transparent PTY bridge"))
+        if backend == "none":
+            checks.append(check(WARN, f"player {player}: no backend; every recoil command is dropped"))
+
+    return report
+
+
+def fire(report: dict, args: argparse.Namespace, broker: ModuleType) -> dict:
+    """Send one whitelisted frame through the broker and report what happened."""
+    player = args.player
+    state_file = Path(report["broker"]["state_file"])
+    port = args.port
+    result: dict = {
+        "player": player,
+        "port": port,
+        "command": "A",
+        "sent": False,
+        "outcome": None,
+        "state_before": {},
+        "state_after": {},
+    }
+    report["fire"] = result
+
+    if not report["broker"]["running"]:
+        result["outcome"] = "the broker is not running"
+        report["checks"].append(check(FAIL, f"cannot fire: {result['outcome']}"))
+        return result
+
+    configured = report["config"]["ports"]
+    if port is None:
+        served = [int(value) for value, players in sorted(configured.items()) if player in players]
+        if configured and not served:
+            names = ", ".join(f"{value} (player {', '.join(players)})" for value, players in sorted(configured.items()))
+            result["outcome"] = f"player {player} is not served by the configured port(s): {names}"
+            report["checks"].append(check(FAIL, f"cannot fire: {result['outcome']}"))
+            return result
+        port = served[0] if served else DEFAULT_TCP_PORT
+    result["port"] = port
+
+    serving = configured.get(str(port))
+    if serving and player not in serving:
+        result["outcome"] = f"port {port} serves player(s) {', '.join(serving)}"
+        report["checks"].append(check(FAIL, f"cannot fire player {player}: {result['outcome']}"))
+        return result
+
+    def counters() -> dict:
+        entries = read_state(state_file).get("players", {})
+        entry = entries.get(player, {}) if isinstance(entries, dict) else {}
+        return {
+            "sent": entry.get("sent", 0),
+            "dropped": entry.get("dropped", 0),
+            "refused": entry.get("refused", 0),
+            "last_frame": entry.get("last_frame"),
+            "drop_reason": entry.get("drop_reason"),
+        }
+
+    before = counters()
+    result["state_before"] = before
+    line = f"{player}A\n".encode("ascii")
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=2.0) as client:
+            client.sendall(line)
+        result["sent"] = True
+    except OSError as exc:
+        result["outcome"] = f"cannot reach the broker on 127.0.0.1:{port}: {exc}"
+        report["checks"].append(check(FAIL, result["outcome"]))
+        return result
+
+    deadline = time.monotonic() + FIRE_TIMEOUT_SECONDS
+    after = before
+    while time.monotonic() < deadline:
+        after = counters()
+        if after["sent"] > before["sent"] or after["dropped"] > before["dropped"] or after["refused"] > before["refused"]:
+            break
+        time.sleep(0.1)
+    result["state_after"] = after
+
+    if after["sent"] > before["sent"]:
+        result["outcome"] = "delivered"
+        report["checks"].append(check(OK, f"fired player {player} once: A8 reached {report['players'].get(player) or 'the device'} (last frame {after['last_frame']})"))
+    elif after["dropped"] > before["dropped"]:
+        reason = after.get("drop_reason") or "the tracker gate or a missing gun"
+        result["outcome"] = "dropped"
+        report["checks"].append(check(WARN, f"fired player {player} once: the broker dropped the frame ({reason}); see {BROKER_LOG}"))
+    elif after["refused"] > before["refused"]:
+        result["outcome"] = "refused"
+        report["checks"].append(check(FAIL, f"fired player {player} once: the safety chokepoint refused the frame"))
+    else:
+        result["outcome"] = "unknown"
+        report["checks"].append(check(FAIL, f"fired player {player} once: the broker counted nothing after {FIRE_TIMEOUT_SECONDS:.0f}s"))
+    return result
+
+
+def print_row(label: str, value: str) -> None:
+    print(f"  {label:<18} {value}")
+
+
+def render(report: dict) -> None:
+    broker = report["broker"]
+    print(f"HOTR Sinden check — {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    print("\nSinden broker")
+    print_row("enabled", "yes" if broker["enabled"] else "no")
+    print_row("bridge opt-in", "yes (legacy)" if broker["bridge_enabled"] else "no")
+    if broker["running"]:
+        print_row("process", f"running (PID {broker['pid']})")
+    else:
+        print_row("process", "not running" + (f" (stale pid {broker['pid']})" if broker["pid"] else ""))
+    age = broker["state_age"]
+    print_row("state file", f"{broker['state_file']}" + (f" ({age:.0f} s old)" if age is not None else " (not published)"))
+    print_row("log", broker["log"])
+    print_row("config", report["config"]["path"])
+    if report["config"]["ports"]:
+        for port, players in report["config"]["ports"].items():
+            print_row("tcp port", f"{port} -> player {', '.join(players)}")
+    else:
+        print_row("tcp port", f"no ports in {report['config']['path']} (broker default {DEFAULT_TCP_PORT})")
+
+    print("\nGuns")
+    if report["devices"]:
+        for device, usb in report["devices"].items():
+            print_row(Path(device).name, f"{device} (USB {usb or 'unknown'})")
+    else:
+        print_row("/dev/ttyACM*", "no Sinden gun found")
+    for player, device in sorted(report["players"].items()):
+        print_row(f"player {player}", device or "no gun found")
+
+    if report["tracker"]:
+        print("\nLightgunMono")
+        for device, config in sorted(report["tracker"].items()):
+            print_row(device, config)
+
+    if report["state"]:
+        print("\nBroker counters")
+        for player, counters in sorted(report["state"].items()):
+            counters = counters if isinstance(counters, dict) else {}
+            print_row(
+                f"player {player}",
+                f"backend={counters.get('backend', 'unknown')} tracker_ready={counters.get('tracker_ready')} "
+                f"sent={counters.get('sent', 0)} dropped={counters.get('dropped', 0)} "
+                f"refused={counters.get('refused', 0)} reply_bytes={counters.get('reply_bytes', 0)}",
+            )
+            if counters.get("last_frame"):
+                print_row("", f"last frame {counters['last_frame']} ({counters.get('last_reason') or '?'})")
+            if counters.get("drop_reason"):
+                print_row("", f"last drop {counters['drop_reason']}")
+
+    if report.get("fire"):
+        entry = report["fire"]
+        print("\nFire test")
+        print_row("command", f"{entry['player']}A (A8, one pulse) -> 127.0.0.1:{entry['port']}")
+        print_row("sent", "yes" if entry["sent"] else "no")
+        print_row("outcome", entry["outcome"] or "unknown")
+        before, after = entry["state_before"], entry["state_after"]
+        print_row("counters", f"sent {before.get('sent')} -> {after.get('sent')}, "
+                              f"dropped {before.get('dropped')} -> {after.get('dropped')}")
+
+    levels = [item["level"] for item in report["checks"]]
+    verdict = FAIL if FAIL in levels else WARN if WARN in levels else OK
+    print(f"\nVerdict: {verdict}")
+    for item in report["checks"]:
+        print(f"  [{item['level']:<4}] {item['message']}")
+
+
+def main() -> int:
+    args = parse_args()
+    logging.basicConfig(level=logging.ERROR, format="hotr-sinden-check: %(message)s")
+    broker = load_broker(broker_path(args.broker))
+    report = collect(args, broker)
+    if args.fire:
+        fire(report, args, broker)
+    if args.json:
+        print(json.dumps(report, indent=2, sort_keys=True))
+    else:
+        render(report)
+    return 1 if any(item["level"] == FAIL for item in report["checks"]) else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

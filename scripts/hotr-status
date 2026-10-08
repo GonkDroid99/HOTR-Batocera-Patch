@@ -2,12 +2,14 @@
 # Concise runtime health summary for HOTR Batocera installations.
 set -u
 
-ROOT=/userdata/system/hotr
+ROOT="${HOTR_ROOT:-/userdata/system/hotr}"
 APP="$ROOT/software/hook-of-the-reaper/hook-of-the-reaper"
 DATA=/userdata/system/hook-of-the-reaper/data
 REGISTRY="$DATA/devices.json"
 HOTR_LOG=/userdata/system/logs/hook-of-the-reaper.log
 SENDER_LOG=/tmp/MameOutputSender.log
+SINDEN_STATE="$ROOT/sinden-broker-state.json"
+SINDEN_PID_FILE=/var/run/hotr-sinden-broker.pid
 
 section(){ printf '\n%s\n' "$1"; }
 value(){ printf '  %-18s %s\n' "$1" "$2"; }
@@ -74,6 +76,77 @@ value last-open "${last_open:-none}"
 value last-error "${last_error:-none}"
 last_recovery="$(grep -E '\[HOTR\] (Serial device recovered|Hardware configuration changed)' "$HOTR_LOG" 2>/dev/null | tail -n 1 || true)"
 value last-recovery "${last_recovery:-none}"
+
+section 'Sinden recoil'
+if [ -f "$ROOT/sinden-tcp.enabled" ]; then
+  value enabled yes
+else
+  value enabled "no (recoil off)"
+fi
+if [ -s "$SINDEN_STATE" ]; then
+  python3 - "$SINDEN_STATE" "$SINDEN_PID_FILE" <<'PY' || value state 'unreadable broker state file'
+import json
+import os
+import sys
+
+try:
+    with open(sys.argv[1], encoding="utf-8") as handle:
+        state = json.load(handle)
+except (OSError, ValueError) as exc:
+    print(f"  {'state':<18} unreadable: {exc}")
+    raise SystemExit(0)
+
+pid = state.get("pid")
+running = False
+if isinstance(pid, int):
+    try:
+        os.kill(pid, 0)
+        running = True
+    except OSError:
+        running = False
+
+stamp = state.get("updated") or "unknown"
+print(f"  {'broker':<18} {'running (PID ' + str(pid) + ')' if running else 'not running'}; state written {stamp}")
+
+players = state.get("players") or {}
+if not players:
+    print(f"  {'players':<18} no player has been configured yet")
+for player in sorted(players):
+    entry = players[player] or {}
+    backend = entry.get("backend") or "none"
+    device = entry.get("device") or "no device"
+    usb = entry.get("usb_id")
+    gate = entry.get("tracker_gate", True)
+    if entry.get("tracker_ready"):
+        tracker = "tracker ready"
+    elif gate:
+        tracker = "waiting for LightgunMono"
+    else:
+        tracker = "tracker gate off"
+    worker = " (legacy bridge worker)" if entry.get("worker") else ""
+    if backend == "none":
+        print(f"  {'player ' + str(player):<18} no gun found for player {player}; recoil is dropped")
+    else:
+        suffix = f" USB {usb}" if usb else ""
+        print(f"  {'player ' + str(player):<18} {backend} {device}{suffix}; {tracker}{worker}")
+    age = entry.get("last_frame_age")
+    age_text = f" ({age}s ago)" if isinstance(age, int) else ""
+    print(
+        f"  {'frames ' + str(player):<18} "
+        f"sent {entry.get('sent', 0)} dropped {entry.get('dropped', 0)} "
+        f"refused {entry.get('refused', 0)} gun-replies {entry.get('reply_bytes', 0)}"
+    )
+    if entry.get("last_frame"):
+        print(f"  {'last ' + str(player):<18} {entry['last_frame']}{age_text}")
+    if entry.get("last_drop"):
+        print(f"  {'dropped ' + str(player):<18} {entry['last_drop']}")
+PY
+else
+  value state 'no broker state file yet (recoil off, or the broker has not started)'
+fi
+if [ -r "$SINDEN_PID_FILE" ]; then
+  value pid-file "$SINDEN_PID_FILE (PID $(cat "$SINDEN_PID_FILE" 2>/dev/null || echo '?'))"
+fi
 
 section Logs
 value HOTR "$HOTR_LOG"

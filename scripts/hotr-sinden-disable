@@ -1,0 +1,124 @@
+#!/bin/bash
+# hotr-sinden-disable — turn HOTR's Sinden recoil broker off.
+#
+# Stops the running broker and removes the enable file, so the hotr service will
+# not start it again on the next boot. LightgunMono keeps the gun's tty either
+# way: disabling recoil never breaks aiming.
+#
+#   hotr-sinden-disable             stop the broker and keep it off
+#   hotr-sinden-disable --revert    also remove the legacy PTY bridge patch from
+#                                   Batocera's Sinden helper (never applied by
+#                                   default, but an older install may carry it)
+#
+# To turn recoil back on: create the enable file and start the service, or rerun
+# the installer with HOTR_SINDEN_TCP=1.
+set -u
+
+HOTR=${HOTR_ROOT:-/userdata/system/hotr}
+ENABLE_FILE="$HOTR/sinden-tcp.enabled"
+PID_FILE=${HOTR_SINDEN_PID_FILE:-/var/run/hotr-sinden-broker.pid}
+RUN_DIR=${HOTR_SINDEN_RUN_DIR:-/var/run/hotr-sinden}
+
+revert=0
+for argument in "$@"; do
+  case "$argument" in
+    --revert) revert=1 ;;
+    --help|-h)
+      sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'
+      exit 0
+      ;;
+    *)
+      echo "usage: hotr-sinden-disable [--revert]" >&2
+      exit 2
+      ;;
+  esac
+done
+
+echo "HOTR Sinden disable"
+
+stop_pid() {
+  local pid="$1" label="$2"
+  kill -TERM "$pid" 2>/dev/null || return 1
+  local waited=0
+  while kill -0 "$pid" 2>/dev/null; do
+    waited=$((waited + 1))
+    if [ "$waited" -ge 50 ]; then
+      echo "  force-killing $label (PID $pid)"
+      kill -KILL "$pid" 2>/dev/null || true
+      break
+    fi
+    sleep 0.1
+  done
+  echo "  stopped $label (PID $pid)"
+  return 0
+}
+
+if [ -f "$ENABLE_FILE" ]; then
+  rm -f "$ENABLE_FILE"
+  echo "  removed $ENABLE_FILE (the broker stays off after a reboot)"
+else
+  echo "  already disabled ($ENABLE_FILE is absent)"
+fi
+
+stopped=0
+if [ -f "$PID_FILE" ]; then
+  pid="$(cat "$PID_FILE" 2>/dev/null || true)"
+  if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+    stop_pid "$pid" "the Sinden broker" && stopped=1
+  else
+    echo "  clearing stale pid file $PID_FILE"
+  fi
+  rm -f "$PID_FILE"
+fi
+
+# Anything still running the broker script was started outside the service. The
+# cmdline is inspected so a shell command that merely mentions the script name is
+# never killed.
+broker_pids() {
+  local pid
+  for pid in $(pgrep -f 'hotr-sinden-broker[.]py' 2>/dev/null || true); do
+    [ "$pid" = "$$" ] && continue
+    [ "$pid" = "${PPID:-0}" ] && continue
+    local argv=()
+    mapfile -d '' -t argv < "/proc/$pid/cmdline" 2>/dev/null || continue
+    [ "${#argv[@]}" -ge 2 ] || continue
+    case "${argv[0]}" in *python*) ;; *) continue ;; esac
+    case "${argv[1]}" in */hotr-sinden-broker.py) ;; *) continue ;; esac
+    printf '%s\n' "$pid"
+  done
+}
+
+while read -r leftover; do
+  [ -n "$leftover" ] || continue
+  stop_pid "$leftover" "Sinden broker (PID $leftover)" && stopped=1
+done < <(broker_pids)
+
+# The retired PTY bridge starts one worker per gun; stop any that outlived the
+# broker, then clear the runtime directory it owns.
+for worker in "$RUN_DIR"/*.worker.pid; do
+  [ -f "$worker" ] || continue
+  pid="$(cat "$worker" 2>/dev/null || true)"
+  if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+    stop_pid "$pid" "Sinden bridge worker (${worker##*/})" && stopped=1
+  fi
+  rm -f "$worker"
+done
+
+if [ "$stopped" -eq 0 ]; then
+  echo "  no Sinden broker process was running"
+fi
+
+if [ "$revert" -eq 1 ]; then
+  if [ -x "$HOTR/tools/patch-batocera-sinden-hotr.sh" ]; then
+    "$HOTR/tools/patch-batocera-sinden-hotr.sh" remove
+  else
+    echo "  legacy patch helper not installed; nothing to revert"
+  fi
+fi
+
+cat <<EOF
+
+Recoil is off. To turn it back on:
+  touch $ENABLE_FILE && /userdata/system/services/hotr start
+or rerun the installer with HOTR_SINDEN_TCP=1.
+EOF

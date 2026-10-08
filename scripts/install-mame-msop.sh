@@ -36,6 +36,14 @@ cp -a "$MSOP_ROOT" "$MAME_SAVES/plugins/stateoutput"
 # for games such as alien3, where MSOP_P1_Recoil was verified at runtime.
 if [ -d "$TMP/extract/Hook Of The Reaper/defaultLG" ]; then
   cp -a "$TMP/extract/Hook Of The Reaper/defaultLG"/. "$HOTR_DATA/defaultLG/"
+  # The archive overwrites this machine's copies of those MAME game files, so
+  # re-add the Sinden trigger-recoil option that ammo-mode game files need.
+  # This script is also run on its own, so it cannot rely on install.sh doing
+  # it: without the option a Sinden gun never arms its firmware trigger recoil.
+  if command -v python3 >/dev/null 2>&1; then
+    TR_SUMMARY="$(python3 "$BASE/payload/system/hotr-sinden-trigger-recoil" --dir "$HOTR_DATA/defaultLG" || true)"
+    echo "HOTR: Sinden trigger recoil in MSOP game files: ${TR_SUMMARY:-not configured}"
+  fi
 fi
 
 # Batocera already builds a plugin list (hiscore/coindrop/data). Add stateoutput

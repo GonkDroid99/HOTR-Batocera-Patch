@@ -1,0 +1,256 @@
+#!/usr/bin/env python3
+"""Configure Sinden trigger recoil in Hook of the Reaper game files.
+
+Why this exists
+---------------
+HOTR lets a light gun recoil in one of four modes, picked in the order the *gun*
+prefers them (ComDeviceList::automaticRecoilPriority): Ammo_Value, Recoil,
+Recoil_R2S, Recoil_Value.  A Sinden gun prefers Ammo_Value first, so for every
+game whose file declares ``Ammo_Value 1`` HOTR selects ammo mode, never registers
+the game's ``GunRecoil_P1``/``GunRecoil_P2`` signal and therefore never sends the
+``Recoil=A`` command that ``payload/hotr/data/sinden.hor`` defines.
+
+The Windows Sinden software handles that case itself.  On Linux LightgunMono has
+no control surface at all (no socket, no command line), so the only component
+that can arm the gun's own trigger recoil is HOTR - through a game-file option::
+
+    Sinden_Trigger_Recoil <0-3>
+        0 = one recoil per shot
+        1 = auto normal
+        2 = auto fast
+        3 = auto strong
+
+HOTR applies it to Sinden guns only (``LightGun::SetSindenRecoilOverride``), but
+no shipped game file sets it, so a stock install never recoils in ammo mode.
+This tool adds the option so the operator does not have to edit game files.
+
+What it does
+------------
+For every ``*.txt`` game file under ``--dir`` that declares ammo mode
+(``Ammo_Value 1``) and does not already set the option, insert
+``Sinden_Trigger_Recoil <value>`` as the first line of its ``[Options]`` block,
+creating ``[Options]``/``End Options`` just before ``[States]`` when the game
+file has no options block.  HOTR requires the options block to come before the
+states block, and it requires the option line to start at column 1 with exactly
+two fields, otherwise it rejects the whole game file.
+
+Everything else is preserved byte for byte, including the per-line CRLF/LF mix
+that these files use.  The operation is idempotent.
+
+Caveat: if a gun's recoil priority is changed so that recoil mode wins over ammo
+mode, the gun would both kick on its own (this option) and receive HOTR's
+``>Recoil`` command.  Delete the line from that game file in that case.
+
+Exit status
+-----------
+0  nothing left to do, or the game files were updated
+1  ``--check``: at least one ammo-mode game file still lacks the option
+2  the game-file directory (or ``--value``) is unusable
+
+The last stdout line is always a one-line ``key=value`` summary so installers and
+tests can assert on it; human-readable notes go to stderr.
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import pathlib
+import sys
+
+OPTION_KEY = "Sinden_Trigger_Recoil"
+OPTIONS_SECTION = b"[Options]"
+END_OPTIONS = b"End Options"
+STATES_SECTION = b"[States]"
+RECOIL_RELOAD_HEADER = b"Recoil & Reload"
+AMMO_KEY = b"Ammo_Value"
+AMMO_ON = b"1"
+DEFAULT_VALUE = 2
+MAX_VALUE = 3
+DEFAULT_DIR = "/userdata/system/hook-of-the-reaper/defaultLG"
+
+
+def split_lines(data: bytes) -> list[bytes]:
+    """Split on LF only, keeping the line endings (both LF and CRLF)."""
+    lines: list[bytes] = []
+    start = 0
+    for index, byte in enumerate(data):
+        if byte == 0x0A:
+            lines.append(data[start : index + 1])
+            start = index + 1
+    if start < len(data):
+        lines.append(data[start:])
+    return lines
+
+
+def body(line: bytes) -> bytes:
+    return line.rstrip(b"\r\n")
+
+
+def ending(line: bytes) -> bytes:
+    if line.endswith(b"\r\n"):
+        return b"\r\n"
+    if line.endswith(b"\n"):
+        return b"\n"
+    return b""
+
+
+def tokens(line: bytes) -> list[bytes]:
+    return body(line).split()
+
+
+def find(lines: list[bytes], predicate) -> int:
+    for index, line in enumerate(lines):
+        if predicate(line):
+            return index
+    return -1
+
+
+class GameFile:
+    """One HOTR game file (a per-game light gun profile)."""
+
+    def __init__(self, path: pathlib.Path) -> None:
+        self.path = path
+        self.data = path.read_bytes()
+        self.lines = split_lines(self.data)
+        self.option_index = find(self.lines, lambda l: body(l).startswith(OPTION_KEY.encode()))
+        self.options_index = find(self.lines, lambda l: body(l).startswith(OPTIONS_SECTION))
+        self.states_index = find(self.lines, lambda l: body(l).startswith(STATES_SECTION))
+        self.header = find(self.lines, lambda l: body(l).startswith(RECOIL_RELOAD_HEADER)) >= 0
+        self.ammo = find(self.lines, self._is_ammo_on) >= 0
+
+    @staticmethod
+    def _is_ammo_on(line: bytes) -> bool:
+        parts = tokens(line)
+        return len(parts) >= 2 and parts[0] == AMMO_KEY and parts[1] == AMMO_ON
+
+    def is_game_file(self) -> bool:
+        return self.header and self.states_index >= 0
+
+    def with_option(self, value: int) -> tuple[str, list[bytes] | None]:
+        """Return (action, new lines) describing what configuring this file needs."""
+        if not self.is_game_file():
+            return "ignored", None
+        if self.option_index >= 0:
+            return "already", None
+        if not self.ammo:
+            return "not-ammo", None
+        option = OPTION_KEY.encode() + b" " + str(value).encode()
+        if self.options_index >= 0:
+            if self.options_index > self.states_index:
+                # HOTR rejects an options block that comes after the states block.
+                return "after-states", None
+            block = [option + (ending(self.lines[self.options_index]) or b"\n")]
+            lines = list(self.lines)
+            lines[self.options_index + 1 : self.options_index + 1] = block
+            return "updated", lines
+        newline = ending(self.lines[self.states_index]) or b"\n"
+        block = [OPTIONS_SECTION + newline, option + newline, END_OPTIONS + newline]
+        lines = list(self.lines)
+        lines[self.states_index : self.states_index] = block
+        return "updated-options-block", lines
+
+    def write(self, lines: list[bytes]) -> None:
+        self.path.write_bytes(b"".join(lines))
+
+
+def resolve_dir(explicit: str | None) -> pathlib.Path:
+    if explicit:
+        return pathlib.Path(explicit)
+    env = os.environ.get("HOTR_DATA")
+    if env:
+        return pathlib.Path(env) / "defaultLG"
+    return pathlib.Path(DEFAULT_DIR)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Add Sinden_Trigger_Recoil to HOTR game files that use ammo recoil.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("--dir", help=f"game file directory (default: $HOTR_DATA/defaultLG, else {DEFAULT_DIR})")
+    parser.add_argument("--value", type=int, default=DEFAULT_VALUE,
+                        help=f"Sinden_Trigger_Recoil value 0-{MAX_VALUE} (default: {DEFAULT_VALUE} = auto fast)")
+    parser.add_argument("--check", action="store_true", help="only report; exit 1 when a game file lacks the option")
+    parser.add_argument("--dry-run", action="store_true", help="report what would change without writing")
+    parser.add_argument("--quiet", action="store_true", help="suppress the human-readable notes (stderr)")
+    parser.add_argument("--verbose", action="store_true", help="name every game file that changes or is missing the option")
+    args = parser.parse_args(argv)
+
+    if not 0 <= args.value <= MAX_VALUE:
+        print(f"error: --value must be 0-{MAX_VALUE}", file=sys.stderr)
+        return 2
+
+    root = resolve_dir(args.dir)
+    if not root.is_dir():
+        print(f"error: game file directory not found: {root}", file=sys.stderr)
+        return 2
+
+    def note(message: str) -> None:
+        if not args.quiet:
+            print(message, file=sys.stderr)
+
+    profiles = ammo = updated = already = ignored = after_states = 0
+    changed: list[str] = []
+    missing: list[str] = []
+
+    for path in sorted(root.rglob("*.txt")):
+        if not path.is_file():
+            continue
+        profiles += 1
+        game = GameFile(path)
+        if not game.is_game_file():
+            ignored += 1
+            continue
+        if not game.ammo:
+            continue
+        ammo += 1
+        relative = str(path.relative_to(root))
+        action, lines = game.with_option(args.value)
+        if action == "already":
+            already += 1
+            continue
+        if action == "after-states":
+            after_states += 1
+            missing.append(relative)
+            note(f"warning: {relative} has [Options] after [States]; HOTR rejects that, left alone")
+            continue
+        if action not in ("updated", "updated-options-block"):
+            ignored += 1
+            missing.append(relative)
+            continue
+        if args.check or args.dry_run:
+            missing.append(relative)
+            if args.verbose:
+                note(f"missing {OPTION_KEY}: {relative}")
+            continue
+        assert lines is not None
+        game.write(lines)
+        updated += 1
+        changed.append(relative)
+        if args.verbose:
+            note(f"added {OPTION_KEY} {args.value}: {relative}")
+
+    unconfigured = ammo - already - updated
+    if args.check:
+        summary = (f"profiles={profiles} ammo={ammo} missing={len(missing)} already={already} "
+                   f"value={args.value} mode=check")
+    elif args.dry_run:
+        summary = (f"profiles={profiles} ammo={ammo} would_update={len(missing)} already={already} "
+                   f"value={args.value} mode=dry-run unconfigured={unconfigured}")
+    else:
+        summary = (f"profiles={profiles} ammo={ammo} updated={updated} already={already} "
+                   f"value={args.value} mode=write unconfigured={unconfigured}")
+    print(summary)
+
+    if after_states:
+        note(f"{after_states} game file(s) have a misplaced [Options] block and were left alone")
+    if args.check and missing:
+        note(f"{len(missing)} ammo-mode game file(s) lack {OPTION_KEY}: "
+             + ", ".join(missing[:10]) + (" …" if len(missing) > 10 else ""))
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

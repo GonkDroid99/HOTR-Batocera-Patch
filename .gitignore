@@ -20,6 +20,12 @@ __pycache__/
 .vscode/
 .idea/
 
+# Acceptance-run evidence bundles: the runner writes these next to wherever it
+# is started, so keep them out of normal Git; they are kept alongside the repo
+# (e.g. ~/HOTRBatoceradev/Current/hotr-sinden-evidence/) when they must persist.
+hotr-sinden-vm-*/
+hotr-sinden-vm-*.tar.gz
+
 # Batocera Buildroot working data / native binary outputs
 buildroot/buildroot.conf
 buildroot/buildroot.v44.conf
@@ -30,5 +36,70 @@ BINARY_RELEASES.md
 CLEAN_EXISTING_REPO.md
 
 scripts/test-hotr-autoconfig.sh
-.gitignore
+
 payload/hotr/HookOfTheReaper-x86_64.AppImage.before-20261001-2343
+.pi/tasks/01a1092f-88b2-71a6-8712-ab2b1ced89b4-8114/b2f20ec71.json
+.pi/tasks/01a1092f-88b2-71a6-8712-ab2b1ced89b4-8114/b2f20ec71.output
+.pi/tasks/01a1092f-88b2-71a6-8712-ab2b1ced89b4-8114/b7a36af5c.json
+.pi/tasks/01a1092f-88b2-71a6-8712-ab2b1ced89b4-8114/b7a36af5c.output
+.pi/tasks/01a1092f-88b2-71a6-8712-ab2b1ced89b4-8114/b7c0690f7.json
+.pi/tasks/01a1092f-88b2-71a6-8712-ab2b1ced89b4-8114/b7c0690f7.output
+.pi/tasks/01a1092f-88b2-71a6-8712-ab2b1ced89b4-8114/b50c8c8c1.json
+.pi/tasks/01a1092f-88b2-71a6-8712-ab2b1ced89b4-8114/b50c8c8c1.output
+.pi/tasks/01a1092f-88b2-71a6-8712-ab2b1ced89b4-8114/b93eec3ad.json
+.pi/tasks/01a1092f-88b2-71a6-8712-ab2b1ced89b4-8114/b93eec3ad.output
+.pi/tasks/01a1092f-88b2-71a6-8712-ab2b1ced89b4-8114/b3652a03b.json
+.pi/tasks/01a1092f-88b2-71a6-8712-ab2b1ced89b4-8114/b3652a03b.output
+.pi/tasks/01a1092f-88b2-71a6-8712-ab2b1ced89b4-8114/b7136beeb.json
+.pi/tasks/01a1092f-88b2-71a6-8712-ab2b1ced89b4-8114/b7136beeb.output
+.pi/tasks/01a1092f-88b2-71a6-8712-ab2b1ced89b4-8114/ba65c4286.json
+.pi/tasks/01a1092f-88b2-71a6-8712-ab2b1ced89b4-8114/ba65c4286.output
+.pi/tasks/01a1092f-88b2-71a6-8712-ab2b1ced89b4-8114/beb1af0e4.json
+.pi/tasks/01a1092f-88b2-71a6-8712-ab2b1ced89b4-8114/beb1af0e4.output
+.pi/tasks/01a1092f-88b2-71a6-8712-ab2b1ced89b4-8114/bf81f1820.json
+.pi/tasks/01a1092f-88b2-71a6-8712-ab2b1ced89b4-8114/bf81f1820.output
+docs/PROJECT_LAYOUT.md
+.openwikiignore
+PLAN.md
+reference/sinden-firmware-notes.md
+openwiki/.last-update.json
+openwiki/.page-manifest.json
+openwiki/buildroot-toolchain.md
+openwiki/configuration-reference.md
+openwiki/development-runbook.md
+openwiki/emulationstation-integration.md
+openwiki/emulator-integration.md
+openwiki/faq.md
+openwiki/glossary.md
+openwiki/hardware-and-gun-support.md
+openwiki/hotr-payload-data.md
+openwiki/hotr-service.md
+openwiki/index.md
+openwiki/install-lifecycle.md
+openwiki/INSTRUCTIONS.md
+openwiki/known-limitations.md
+openwiki/logs-and-diagnostics.md
+openwiki/overview.md
+openwiki/quickstart.md
+openwiki/reference-cheatsheet.md
+openwiki/reference-commands.md
+openwiki/reference-troubleshooting.md
+openwiki/release-pipeline.md
+openwiki/release-runbook.md
+openwiki/safety-model.md
+openwiki/setup-guide.md
+openwiki/sinden-recoil.md
+openwiki/testing.md
+openwiki/.claims/buildroot-toolchain.json
+openwiki/.claims/emulationstation-integration.json
+openwiki/.claims/emulator-integration.json
+openwiki/.claims/hotr-payload-data.json
+openwiki/.claims/hotr-service.json
+openwiki/.claims/install-lifecycle.json
+openwiki/.claims/overview.json
+openwiki/.claims/quickstart.json
+openwiki/.claims/release-pipeline.json
+openwiki/.claims/sinden-recoil.json
+openwiki/.claims/testing.json
+.github/workflows/openwiki-update.yml
+AGENTS.md

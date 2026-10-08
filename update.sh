@@ -1,5 +1,15 @@
 #!/bin/bash
 set -euo pipefail
+
+# The download and extraction below need these; fail with one readable line
+# instead of a shell error halfway through an update.
+for tool in python3 unzip; do
+  command -v "$tool" >/dev/null 2>&1 || {
+    echo "ERROR: '$tool' is required but missing; repair the Batocera system image and retry." >&2
+    exit 1
+  }
+done
+
 CONF=/userdata/system/hotr/install/installer.conf
 [ -f "$CONF" ] || { echo "Missing $CONF"; exit 1; }
 . "$CONF"
@@ -23,4 +33,15 @@ for candidate in "$TMP/release"/*/install.sh "$TMP/release"/install.sh; do
   if [ -f "$candidate" ]; then ROOT="${candidate%/install.sh}"; break; fi
 done
 [ -n "$ROOT" ] || { echo 'Release has no install.sh'; exit 3; }
-exec "$ROOT/install.sh" --auto
+
+# Run the installer here instead of exec'ing it: the EXIT trap above still has to
+# clean up the extracted release, and an update should end with a recoil health
+# report from the tool that was just refreshed.
+"$ROOT/install.sh" --auto
+status=$?
+if [ "$status" -eq 0 ] && [ -x /usr/bin/hotr-sinden-check ]; then
+  echo
+  echo 'Sinden recoil status after the update:'
+  /usr/bin/hotr-sinden-check || true
+fi
+exit "$status"

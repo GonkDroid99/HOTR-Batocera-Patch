@@ -1,12 +1,20 @@
 #!/bin/bash
-# Comprehensive hardware-free Sinden/Batocera integration test.
-set -euo pipefail
+# Hardware-free Sinden/Batocera suite: runs sections A and B together.
+#
+# Section A (mechanical guarantees) and section B (lab suite: PTY, fake gun,
+# faithful LightgunMono replays) live in the individual suites under
+# scripts/tests/ and are installed next to this script by install.sh. The
+# legacy PTY bridge integration block at the end of this file needs a root
+# Batocera install with the worker launcher, so it is skipped elsewhere.
+set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 if [ -f "$SCRIPT_DIR/../../payload/system/hotr-sinden-broker.py" ]; then
   ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+  SUITES="$ROOT/scripts/tests"
 else
   ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+  SUITES="$ROOT/tools"
 fi
 if [ -f "$ROOT/payload/system/hotr-sinden-broker.py" ]; then
   BROKER="$ROOT/payload/system/hotr-sinden-broker.py"
@@ -22,18 +30,52 @@ fi
 
 LOG="${HOTR_SINDEN_TEST_LOG:-/userdata/system/logs/hotr-sinden-full-selftest.log}"
 V43_HELPER="${HOTR_SINDEN_V43_HELPER:-$STOCK_HELPER}"
-mkdir -p "$(dirname "$LOG")"
+if ! mkdir -p "$(dirname "$LOG")" 2>/dev/null; then
+  LOG="$(mktemp /tmp/hotr-sinden-full-selftest.XXXXXX.log)"
+fi
 exec > >(tee "$LOG") 2>&1
 
-echo "HOTR Sinden comprehensive self-test"
+echo "HOTR Sinden comprehensive self-test (sections A + B)"
 echo "Started: $(date)"
 echo "Broker: $BROKER"
-echo "Worker launcher: $WORKER_LAUNCH"
-echo "Patch tool: $PATCH_TOOL"
+echo "Suites: $SUITES"
 
-[ -x "$WORKER_LAUNCH" ] || { echo "[FAIL] worker launcher unavailable"; exit 1; }
-[ -x "$PATCH_TOOL" ] || { echo "[FAIL] patch tool unavailable"; exit 1; }
+SUITE_FAILURES=0
+SUITE_PASSES=0
+SUITE_SKIPS=0
+for suite in hotr-sinden-fakegun-selftest.sh hotr-sinden-tools-selftest.sh \
+             hotr-sinden-broker-selftest.sh hotr-sinden-worker-selftest.sh; do
+  if [ ! -f "$SUITES/$suite" ]; then
+    echo
+    echo "[SKIP] $suite is not installed here"
+    SUITE_SKIPS=$((SUITE_SKIPS + 1))
+    continue
+  fi
+  # The worker suite needs the legacy bridge launcher, which a default
+  # install no longer ships (the direct backend replaced it).
+  if [ "$suite" = hotr-sinden-worker-selftest.sh ] && [ ! -x "$WORKER_LAUNCH" ]; then
+    echo
+    echo "[SKIP] $suite: the legacy PTY bridge worker launcher is not installed"
+    SUITE_SKIPS=$((SUITE_SKIPS + 1))
+    continue
+  fi
+  echo
+  echo "=== $suite ==="
+  if bash "$SUITES/$suite"; then
+    echo "[PASS] $suite"
+    SUITE_PASSES=$((SUITE_PASSES + 1))
+  else
+    echo "[FAIL] $suite"
+    SUITE_FAILURES=$((SUITE_FAILURES + 1))
+  fi
+done
 
+if [ "$(id -u)" != 0 ] || [ ! -x "$WORKER_LAUNCH" ] || [ ! -d /userdata/system/hotr ]; then
+  echo
+  echo "[SKIP] legacy PTY bridge integration (needs root on a Batocera install with the worker launcher)"
+  SUITE_SKIPS=$((SUITE_SKIPS + 1))
+else
+echo
 python3 - "$BROKER" "$WORKER_LAUNCH" "$PATCH_TOOL" "$V43_HELPER" "$STOCK_HELPER" <<'PY'
 import os
 import pty
@@ -85,6 +127,31 @@ def read_fd(fd, expected, timeout=5):
             if expected in data:
                 return data
     raise RuntimeError(f"expected {expected.hex(' ')}; received {data.hex(' ')}")
+
+def read_two_fd(fd, first_frame, second_frame, timeout=5):
+    """Wait for two frames in order. A single read can carry both, so a second
+    read_fd call would lose the trailing frame."""
+    deadline = time.time() + timeout
+    data = b""
+    while time.time() < deadline:
+        ready, _, _ = select.select([fd], [], [], 0.2)
+        if ready:
+            data += os.read(fd, 4096)
+            if first_frame in data and second_frame in data.split(first_frame, 1)[1]:
+                return data
+    raise RuntimeError(
+        f"expected {first_frame.hex(' ')} then {second_frame.hex(' ')}; received {data.hex(' ')}")
+
+def read_silent_fd(fd, timeout=1.0):
+    """Collect whatever arrives in a short window; empty means the broker
+    refused the command instead of writing a frame."""
+    deadline = time.time() + timeout
+    data = b""
+    while time.time() < deadline:
+        ready, _, _ = select.select([fd], [], [], 0.15)
+        if ready:
+            data += os.read(fd, 4096)
+    return data
 
 def launch_gun(name):
     master, slave = pty.openpty()
@@ -162,23 +229,46 @@ try:
         first, second = names
         report("player 1 HOTR recoil routing", lambda: (send(45990, "1A"), physical(first, bytes.fromhex("aa a8 00 00 00 00 bb"))))
         report("player 2 HOTR recoil routing", lambda: (send(45991, "2A"), physical(second, bytes.fromhex("aa a8 00 00 00 00 bb"))))
+        # The command table follows the firmware-verified whitelist: B/C are
+        # refused (A9/AA only queue internal events), and N/U carry the strength
+        # in the quiet A2 frame instead of the A7 frame the firmware answers.
         command_tests = [
-            ("B repeat recoil", "1B", first, "aa a9 00 00 00 00 bb"),
-            ("C stop recoil", "1C", first, "aa aa 00 00 00 00 bb"),
             ("D recoil disabled", "1D", first, "aa a3 00 00 00 00 bb"),
             ("E recoil enabled", "1E", first, "aa a3 01 00 00 00 bb"),
-            ("N strength", "1N8", first, "aa a7 50 00 00 00 bb"),
+            ("N strength", "1N8", first, "aa a2 50 00 50 0d bb"),
             ("J enable flag", "1J1", first, "aa a1 01 00 00 00 bb"),
             ("K trigger flag", "1K1", first, "aa a4 01 00 00 00 bb"),
             ("P pulse settings", "1P80", first, "aa a2 50 00 50 0d bb"),
             ("Q pulse delay", "1Q9", first, "aa a2 32 00 32 09 bb"),
             ("R start delay", "1R5", first, "aa a2 32 05 32 0d bb"),
             ("S single recoil alias", "1S", first, "aa a8 00 00 00 00 bb"),
-            ("U strength and recoil", "1U7", first, "aa a7 46 00 00 00 bb"),
         ]
         for label, command, gun, expected in command_tests:
             report(label, lambda command=command, gun=gun, expected=bytes.fromhex(expected): (send(45990, command), physical(gun, expected)))
-        report("F preset produces configuration frames", lambda: (send(45990, "1F"), physical(first, bytes.fromhex("aa a2 50 05 50 0d bb"))))
+        report("U strength and recoil", lambda: (
+            send(45990, "1U7"),
+            read_two_fd(guns[first]["master"], bytes.fromhex("aa a2 46 00 46 0d bb"),
+                        bytes.fromhex("aa a8 00 00 00 00 bb")),
+        ))
+        report("F preset produces configuration frames", lambda: (
+            send(45990, "1F"),
+            read_two_fd(guns[first]["master"], bytes.fromhex("aa a2 50 05 50 0d bb"),
+                        bytes.fromhex("aa a3 01 00 00 00 bb")),
+        ))
+        def refuse(label, command, gun):
+            send(45990, command)
+            data = read_silent_fd(guns[gun]["master"])
+            if data:
+                raise RuntimeError(f"{label} produced bytes: {data.hex(' ')}")
+        report("B repeat recoil is refused", lambda: refuse("B", "1B", first))
+        report("C stop recoil is refused", lambda: refuse("C", "1C", first))
+        def refusal_logged():
+            time.sleep(0.3)
+            text = broker_log.read_text(errors="replace") if broker_log.exists() else ""
+            for needle in ("refusing command B", "refusing command C"):
+                if needle not in text:
+                    raise RuntimeError(f"the broker log does not contain {needle!r}")
+        report("refused commands are logged, not framed", refusal_logged)
         report("Mono-to-Sinden transparent serial path", lambda: mono(first, b"mono-config-test"))
         report("Sinden-to-Mono transparent serial path", lambda: (os.write(guns[first]["master"], b"sinden-status"), read_fd(guns[first]["mono"], b"sinden-status")))
         original_map = map_file.read_text() if map_file.exists() else ""
@@ -232,10 +322,27 @@ if failed:
         print(f"FAILED: {name}: {detail}")
     raise SystemExit(1)
 PY
+LEGACY_STATUS=$?
+
+if [ "$LEGACY_STATUS" -eq 0 ]; then
+  echo "[PASS] legacy PTY bridge integration"
+  SUITE_PASSES=$((SUITE_PASSES + 1))
+else
+  echo "[FAIL] legacy PTY bridge integration"
+  SUITE_FAILURES=$((SUITE_FAILURES + 1))
+fi
 
 echo "--- broker log tail ---"
 tail -n 120 /tmp/hotr-sinden-full-selftest-broker.log 2>/dev/null || true
 echo "--- runtime cleanup state ---"
 find /var/run/hotr-sinden -maxdepth 1 -type f -printf '%f\n' 2>/dev/null | sort || true
+fi
+
+echo
+echo "SUMMARY: $SUITE_PASSES suite(s) passed, $SUITE_SKIPS skipped, $SUITE_FAILURES failed"
 echo "Completed: $(date)"
 echo "Log: $LOG"
+if [ "$SUITE_FAILURES" -ne 0 ]; then
+  exit 1
+fi
+echo "[PASS] Sinden sections A and B are green."

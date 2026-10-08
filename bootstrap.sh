@@ -4,6 +4,15 @@
 # by GitHub's /releases/latest endpoint.
 set -euo pipefail
 
+# This script downloads a ZIP and unpacks it, then hands over to install.sh.
+# Name a missing tool here instead of failing inside the python heredoc.
+for tool in python3 unzip; do
+  command -v "$tool" >/dev/null 2>&1 || {
+    echo "ERROR: '$tool' is required but missing; repair the Batocera system image and retry." >&2
+    exit 1
+  }
+done
+
 REPO="GonkDroid99/HOTR-Batocera-Patch"
 VER="$(cat /usr/share/batocera/batocera.version 2>/dev/null || true)"
 [ -n "$VER" ] || VER="$(batocera-info 2>/dev/null | head -1 || true)"

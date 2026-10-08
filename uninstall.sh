@@ -46,6 +46,7 @@ fi
 rm -rf /userdata/saves/mame/plugins/stateoutput
 rm -f /etc/udev/rules.d/99-hotr.rules /etc/udev/rules.d/99-retroshooter-joystick-override.rules
 rm -f /usr/bin/batocera-config-duckstation-hotr /usr/bin/batocera-config-pcsx2-hotr /usr/bin/batocera-config-hotr /usr/bin/hotr-gun-assignment
+rm -f /usr/bin/hotr-sinden-check /usr/bin/hotr-sinden-disable /usr/bin/hotr-sinden-trigger-recoil
 # Batocera 43 has no batocera_launch package; an empty lookup is normal.
 LAUNCH_ROOT="$(printf '%s\n' /usr/lib/python*/site-packages/batocera_launch | sort -V | while read -r candidate; do [ -d "$candidate" ] && printf '%s\n' "$candidate"; done | tail -n1 || true)"
 if [ -n "$LAUNCH_ROOT" ]; then
@@ -65,7 +66,7 @@ if [ -e "$HOTR/backups/emulationstation.original" ]; then
 fi
 rm -f /usr/share/applications/duckstation-hotr-config.desktop /usr/share/applications/pcsx2-hotr-config.desktop /usr/share/applications/hotr-config.desktop
 rm -f /usr/share/duckstation-lightgun
-rm -f "$HOTR/sinden-tcp.enabled"
+rm -f "$HOTR/sinden-tcp.enabled" "$HOTR/sinden-pty-bridge.enabled"
 command -v batocera-save-overlay >/dev/null && batocera-save-overlay || true
 rm -rf "$HOTR"
 echo 'HOTR integration removed. Persistent /userdata/system/hook-of-the-reaper data/defaultLG remains.'

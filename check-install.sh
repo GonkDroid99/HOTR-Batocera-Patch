@@ -13,9 +13,17 @@ check_exec /userdata/system/services/hotr
 check_exec /userdata/system/hotr/software/hook-of-the-reaper/hook-of-the-reaper
 check_exec /userdata/system/hotr/bin/hotr-configgen-launch
 check_exec /userdata/system/hotr/bin/hotr-sinden-broker.py
-check_exec /userdata/system/hotr/bin/hotr-sinden-worker-launch
+check_exec /userdata/system/hotr/bin/hotr-sinden-check
+check_exec /userdata/system/hotr/bin/hotr-sinden-disable
+check_exec /userdata/system/hotr/bin/hotr-sinden-trigger-recoil
+check_exec /usr/bin/hotr-sinden-check
+check_exec /usr/bin/hotr-sinden-disable
+check_exec /usr/bin/hotr-sinden-trigger-recoil
 check_exec /userdata/system/hotr/tools/hotr-debug-report.sh
 check_exec /userdata/system/hotr/tools/hotr-monitor
+check_exec /userdata/system/hotr/tools/hotr-sinden-full-selftest.sh
+check_exec /userdata/system/hotr/tools/hotr-sinden-fakegun-selftest.sh
+check_exec /userdata/system/hotr/tools/hotr-sinden-tools-selftest.sh
 check_exec /userdata/system/hotr/bin/hotr-theme-sync
 check_exec /usr/bin/hotr-gun-assignment
 check_exec /userdata/system/hotr/emulators/duckstation/MameOutputSender
@@ -30,10 +38,26 @@ check /userdata/saves/mame/plugins/stateoutput/plugin.json
 
 if [ -f /userdata/system/hotr/sinden-tcp.enabled ]; then
   check /userdata/system/hotr/tools/patch-batocera-sinden-hotr.sh
-  if grep -q 'HOTR SINDEN BROKER INTEGRATION' /usr/bin/virtual-sindenlightgun-add 2>/dev/null; then
-    echo '[OK] Batocera Sinden helper is connected to HOTR broker'
+  if [ -f /userdata/system/hotr/sinden-pty-bridge.enabled ]; then
+    check_exec /userdata/system/hotr/bin/hotr-sinden-worker-launch
+    if grep -q 'HOTR SINDEN BROKER INTEGRATION' /usr/bin/virtual-sindenlightgun-add 2>/dev/null; then
+      echo '[OK] Batocera Sinden helper is connected to the legacy HOTR PTY bridge'
+    else
+      echo '[MISSING] Batocera Sinden helper PTY bridge hook'; ok=0
+    fi
+  elif grep -q 'HOTR SINDEN BROKER INTEGRATION' /usr/bin/virtual-sindenlightgun-add 2>/dev/null; then
+    echo '[MISSING] Batocera Sinden helper still carries the retired PTY bridge hook; rerun install.sh to revert it'; ok=0
   else
-    echo '[MISSING] Batocera Sinden helper broker hook'; ok=0
+    echo '[OK] Batocera Sinden helper is unpatched; the broker writes the gun directly'
+  fi
+  # A Sinden gun that HOTR drives in ammo mode only recoils when its game file
+  # sets Sinden_Trigger_Recoil, which install.sh adds to every ammo-mode file.
+  if [ -x /userdata/system/hotr/bin/hotr-sinden-trigger-recoil ]; then
+    TR_SUMMARY="$(/userdata/system/hotr/bin/hotr-sinden-trigger-recoil --check --quiet 2>/dev/null || true)"
+    case "$TR_SUMMARY" in
+      *"missing=0"*) echo "[OK] Sinden trigger recoil configured in game files ($TR_SUMMARY)" ;;
+      *) echo "[MISSING] ammo-mode game files without Sinden_Trigger_Recoil ($TR_SUMMARY); run hotr-sinden-trigger-recoil"; ok=0 ;;
+    esac
   fi
 else
   echo '[INFO] Sinden HOTR recoil broker is disabled'

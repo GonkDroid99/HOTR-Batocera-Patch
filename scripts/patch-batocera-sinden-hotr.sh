@@ -1,5 +1,13 @@
 #!/bin/bash
-# Enable the HOTR Sinden broker integration in Batocera's native helper.
+# Enable the LEGACY byte-transparent Sinden bridge in Batocera's native helper.
+#
+# The default HOTR backend does not need this: the broker resolves each gun by
+# USB id and writes its tty write-only, so LightgunMono keeps the real device.
+# Applying this patch hands LightgunMono a worker PTY instead, which is the
+# configuration that used to make the gun stop aiming; use it only for
+# troubleshooting, opted in with HOTR_SINDEN_PTY_BRIDGE=1 or
+# /userdata/system/hotr/sinden-pty-bridge.enabled.
+#
 # This is deliberately separate from patch-batocera-sinden.sh, which contains
 # the optional Batocera 43 detection workaround.
 set -euo pipefail
@@ -63,4 +71,4 @@ PY
 chmod 0755 "$ADD"
 udevadm control --reload-rules 2>/dev/null || true
 command -v batocera-save-overlay >/dev/null 2>&1 && batocera-save-overlay || true
-echo "HOTR Sinden broker integration applied. Original helper backed up at $ORIGINAL."
+echo "HOTR Sinden broker integration applied (legacy PTY bridge). Original helper backed up at $ORIGINAL."

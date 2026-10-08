@@ -11,6 +11,10 @@ SINDEN_PID=/var/run/hotr-sinden-broker.pid
 SINDEN_RUN=/var/run/hotr-sinden
 SINDEN_CONTROL="$SINDEN_RUN/broker.sock"
 SINDEN_ENABLE_FILE="$ROOT/sinden-tcp.enabled"
+# Optional device override, one PLAYER=/dev/path per line (see README). Used by
+# guns that do not appear as /dev/ttyACM* and by the VM acceptance run.
+SINDEN_DEVICES_FILE="$ROOT/sinden-devices.conf"
+SINDEN_PTY_BRIDGE_FILE="$ROOT/sinden-pty-bridge.enabled"
 DATADIR=/userdata/system/hook-of-the-reaper/data
 MAX_LOG_BYTES=1048576
 
@@ -27,10 +31,19 @@ service_log(){
 }
 service_log "HOTR service script started: action=${SERVICE_ACTION} pid=$$ boot_id=${SERVICE_BOOT_ID}"
 
+rotate_file() {
+  # Keep one previous generation as <file>.old. The broker enforces the same cap
+  # and suffix from inside the running process; this call only shrinks a legacy
+  # file that grew before the handler existed.
+  local file="$1" size
+  [ -f "$file" ] || return 0
+  size="$(wc -c <"$file" 2>/dev/null || echo 0)"
+  [ "$size" -lt "$MAX_LOG_BYTES" ] && return 0
+  mv -f "$file" "$file.old" 2>/dev/null || true
+}
+
 rotate_log() {
-  [ -f "$LOGFILE" ] || return 0
-  [ "$(wc -c <"$LOGFILE" 2>/dev/null || echo 0)" -lt "$MAX_LOG_BYTES" ] && return 0
-  mv -f "$LOGFILE" "$LOGFILE.old" 2>/dev/null || true
+  rotate_file "$LOGFILE"
 }
 
 proc_cmdline() {
@@ -79,15 +92,36 @@ start_sinden_broker() {
   if [ -r "$SINDEN_PID" ] && kill -0 "$(cat "$SINDEN_PID" 2>/dev/null)" 2>/dev/null; then
     return 0
   fi
-  mkdir -p "$SINDEN_RUN"
   rm -f "$SINDEN_PID"
+  rotate_file "$SINDEN_LOG"
   # 13000 is HOTR's documented default. Configured Sinden profiles may add a
   # second port; the broker reads those from lightguns.hor as well.
-  python3 "$SINDEN_BROKER" --config "$DATADIR/lightguns.hor" --port 13000 \
-    --control-socket "$SINDEN_CONTROL" --log "$SINDEN_LOG" \
+  BROKER_ARGS=(--config "$DATADIR/lightguns.hor" --port 13000 --log "$SINDEN_LOG")
+  if [ -f "$SINDEN_PTY_BRIDGE_FILE" ]; then
+    # Legacy byte-transparent bridge: workers register over the control socket
+    # and LightgunMono is handed a PTY instead of the real gun. Opt-in only;
+    # the default backend writes the gun directly and needs no control socket.
+    mkdir -p "$SINDEN_RUN"
+    BROKER_ARGS+=(--control-socket "$SINDEN_CONTROL")
+  fi
+  if [ -r "$SINDEN_DEVICES_FILE" ]; then
+    while IFS= read -r device; do
+      case "$device" in ''|'#'*) continue ;; esac
+      BROKER_ARGS+=(--device "$device")
+    done <"$SINDEN_DEVICES_FILE"
+  fi
+  python3 "$SINDEN_BROKER" "${BROKER_ARGS[@]}" \
     </dev/null >/dev/null 2>&1 &
   echo $! >"$SINDEN_PID"
-  sleep 1
+  # Never block the ES launch path for long: the broker is checked for an
+  # immediate crash (bad config, port in use) with a short bounded wait, then the
+  # launcher carries on. Ten ms after a healthy start this is already done.
+  attempt=0
+  while [ "$attempt" -lt 3 ]; do
+    kill -0 "$(cat "$SINDEN_PID" 2>/dev/null)" 2>/dev/null && break
+    sleep 0.1
+    attempt=$((attempt + 1))
+  done
   if ! kill -0 "$(cat "$SINDEN_PID" 2>/dev/null)" 2>/dev/null; then
     rm -f "$SINDEN_PID"
   fi
@@ -111,6 +145,13 @@ stop_sinden_broker() {
 
 start_hotr() {
   [ -x "$DAEMON" ] || { echo "HOTR executable missing: $DAEMON" >>"$LOGFILE"; return 1; }
+
+  # The broker is HOTR's TCP peer, not part of the daemon, so it must come back
+  # whenever this service is started - including when the daemon is already up
+  # and only the broker died (crash, OOM kill, gun replug). Starting it here
+  # before the "already running" shortcut is what makes `service start` a real
+  # repair command; start_sinden_broker() is a no-op when it is already running.
+  start_sinden_broker
   hotr_running && return 0
 
   # Refresh the active theme in case it was installed or updated after HOTR.
@@ -126,10 +167,6 @@ start_hotr() {
   export QT_QPA_PLATFORM="${HOTR_QT_PLATFORM:-offscreen}"
   export HOTR_DATA_DIR="$DATADIR"
   unset XDG_RUNTIME_DIR
-
-  # HOTR's Linux TCP client connects to this localhost broker. The broker's
-  # per-gun workers own the physical tty and expose PTYs to Batocera Mono.
-  start_sinden_broker
 
   # Allow user hardware preparation before the daemon opens its devices.
   [ -x "$ROOT/scripts/custom-boot.sh" ] && "$ROOT/scripts/custom-boot.sh" >>"$LOGFILE" 2>&1 || true
