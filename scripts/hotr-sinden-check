@@ -37,6 +37,22 @@ DATA_CONFIG = Path(os.environ.get("HOTR_SINDEN_CONFIG", "/userdata/system/hook-o
 DEFAULT_TCP_PORT = 13000
 STATE_STALE_SECONDS = 15.0
 FIRE_TIMEOUT_SECONDS = 5.0
+HOTR_LOG = Path(os.environ.get("HOTR_LOG", "/userdata/system/logs/hook-of-the-reaper.log"))
+TRACKER_RECOIL_KEYS = (
+    "EnableRecoil",
+    "RecoilTrigger",
+    "TriggerRecoilNormalOrRepeat",
+    "AutoRecoilStrength",
+    "AutoRecoilStartDelay",
+    "AutoRecoilDelayBetweenPulses",
+)
+
+#: F18b: which mechanism actually kicks during the session, as the broker reports it.
+KICK_MODE_LABELS = {
+    "hotr": "HOTR sends every kick (the tracker's own trigger recoil is held off)",
+    "firmware": "the firmware kicks on its own trigger pulls (HOTR sends no shot frame)",
+    "unknown": "neither mechanism has fired yet this session",
+}
 
 OK = "OK"
 WARN = "WARN"
@@ -55,6 +71,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--player", choices=("1", "2"), default="1", help="player for --fire")
     parser.add_argument("--port", type=int, help=f"broker TCP port for --fire (default {DEFAULT_TCP_PORT} or lightguns.hor)")
+    parser.add_argument("--command", default="A", help="broker command to send with --fire (default A: one A8 recoil pulse)")
     parser.add_argument("--config", type=Path, default=DATA_CONFIG, help="HOTR lightguns.hor data file")
     parser.add_argument("--state-file", type=Path, help="broker state file (default next to the broker)")
     parser.add_argument("--dev-root", type=Path, help="directory to scan for ttyACM* guns (default /dev)")
@@ -151,6 +168,31 @@ def read_device_overrides(path: Path = DEVICES_FILE) -> dict[str, str]:
     return overrides
 
 
+def tracker_recoil_keys(config: Path, broker: ModuleType) -> dict[str, str]:
+    """The recoil keys LightgunMono programmed into a gun it started."""
+    keys_of = getattr(broker, "tracker_config_keys", None)
+    if keys_of is None:  # an older broker module next to a newer check tool
+        return {}
+    keys = keys_of(config)
+    return {name: keys[name] for name in TRACKER_RECOIL_KEYS if name in keys}
+
+
+def last_signal_filter() -> str | None:
+    """HOTR's most recent recoil-mode choice, as it logs it at game start."""
+    try:
+        with HOTR_LOG.open("rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            handle.seek(max(0, handle.tell() - 262144))
+            text = handle.read().decode("utf-8", "replace")
+    except OSError:
+        return None
+    for line in reversed(text.splitlines()):
+        if "Output signal filter" in line:
+            _, _, value = line.partition(":")
+            return value.strip() or line.strip()
+    return None
+
+
 def collect(args: argparse.Namespace, broker: ModuleType) -> dict:
     now = time.time()
     tracker_root = args.tracker_root or broker.TRACKER_ROOT
@@ -197,11 +239,16 @@ def collect(args: argparse.Namespace, broker: ModuleType) -> dict:
     for player, device in sorted(overrides.items()):
         report["players"][player] = device
     report["config"]["players"] = configured_players
-    expected_players = configured_players or sorted(broker.SINDEN_USB_IDS.values())
+    expected_players = configured_players or sorted(report["players"]) or ["1"]
     for player in expected_players:
         report["players"].setdefault(player, None)
 
     report["tracker"] = broker.tracker_write_ports(tracker_root)
+    report["tracker_recoil"] = {
+        device: tracker_recoil_keys(Path(config), broker)
+        for device, config in report["tracker"].items()
+    }
+    report["hotr_filter"] = last_signal_filter()
 
     state = read_state(state_file)
     report["state"] = state.get("players", {}) if isinstance(state.get("players"), dict) else {}
@@ -272,6 +319,19 @@ def collect(args: argparse.Namespace, broker: ModuleType) -> dict:
         elif report["broker"]["enabled"]:
             checks.append(check(FAIL, f"player {player}: no gun found for this player"))
 
+    for device, keys in sorted(report.get("tracker_recoil", {}).items()):
+        level = keys.get("EnableRecoil")
+        if level is not None and level != "1":
+            checks.append(check(WARN, f"LightgunMono programmed {device} with EnableRecoil={level}: Batocera's RECOIL setting is off, so the gun ignores every recoil frame. Run 'batocera-settings-set controllers.guns.recoil gun' and replug the gun."))
+        elif keys.get("TriggerRecoilNormalOrRepeat") == "1":
+            checks.append(check(INFO, f"LightgunMono programmed {device} to repeat while the trigger is held (TriggerRecoilNormalOrRepeat=1, {keys.get('AutoRecoilDelayBetweenPulses', '?')} ms apart): in ammo mode a long pull can kick more than once"))
+    mode = report.get("hotr_filter")
+    if mode:
+        if "Ammo" in mode:
+            checks.append(check(INFO, f"HOTR last chose the ammo recoil mode ({mode}): a Sinden then kicks through the gun's own trigger recoil, so the game needs Sinden_Trigger_Recoil; prefer Recoil over Ammo in the gun's recoil priority to let HOTR send the kick itself"))
+        elif "Recoil" in mode or "recoil" in mode:
+            checks.append(check(OK, f"HOTR last chose its own recoil signal ({mode}): the broker sends one frame per shot"))
+
     for player, counters in sorted(report["state"].items()):
         counters = counters if isinstance(counters, dict) else {}
         backend = counters.get("backend", "unknown")
@@ -302,6 +362,15 @@ def fire(report: dict, args: argparse.Namespace, broker: ModuleType) -> dict:
         "state_after": {},
     }
     report["fire"] = result
+
+    command = str(args.command).strip().upper()
+    frames_of = getattr(broker, "command_frames", None)
+    known = frames_of(command) is not None if frames_of is not None else command == "A"
+    if not command or len(command) > 4 or not command.isalnum() or not known:
+        result["outcome"] = f"the broker does not accept the command {args.command!r}"
+        report["checks"].append(check(FAIL, f"cannot fire: {result['outcome']}"))
+        return result
+    result["command"] = command
 
     if not report["broker"]["running"]:
         result["outcome"] = "the broker is not running"
@@ -334,11 +403,13 @@ def fire(report: dict, args: argparse.Namespace, broker: ModuleType) -> dict:
             "refused": entry.get("refused", 0),
             "last_frame": entry.get("last_frame"),
             "last_drop": entry.get("last_drop"),
+            "kick_mode": entry.get("kick_mode"),
+            "suppressed": entry.get("suppressed", 0),
         }
 
     before = counters()
     result["state_before"] = before
-    line = f"{player}A\n".encode("ascii")
+    line = f"{player}{command}\n".encode("ascii")
     try:
         with socket.create_connection(("127.0.0.1", port), timeout=2.0) as client:
             client.sendall(line)
@@ -359,7 +430,8 @@ def fire(report: dict, args: argparse.Namespace, broker: ModuleType) -> dict:
 
     if after["sent"] > before["sent"]:
         result["outcome"] = "delivered"
-        report["checks"].append(check(OK, f"fired player {player} once: A8 reached {report['players'].get(player) or 'the device'} (last frame {after['last_frame']})"))
+        frame = "A8" if command == "A" else command
+        report["checks"].append(check(OK, f"fired player {player} once: {frame} reached {report['players'].get(player) or 'the device'} (last frame {after['last_frame']})"))
     elif after["dropped"] > before["dropped"]:
         reason = after.get("last_drop") or "the broker recorded no reason"
         result["outcome"] = "dropped"
@@ -410,6 +482,10 @@ def render(report: dict) -> None:
         print("\nLightgunMono")
         for device, config in sorted(report["tracker"].items()):
             print_row(device, config)
+        for device, keys in sorted(report.get("tracker_recoil", {}).items()):
+            print_row("recoil keys", ", ".join(f"{name}={value}" for name, value in keys.items()) or "none found")
+        if report.get("hotr_filter"):
+            print_row("HOTR last picked", report["hotr_filter"])
 
     if report["state"]:
         print("\nBroker counters")
@@ -425,11 +501,18 @@ def render(report: dict) -> None:
                 print_row("", f"last frame {counters['last_frame']} ({counters.get('last_reason') or '?'})")
             if counters.get("last_drop"):
                 print_row("", f"last drop {counters['last_drop']}")
+            kick = counters.get("kick_mode")
+            if kick:
+                blocked = counters.get("suppressed") or 0
+                print_row("", f"kick {KICK_MODE_LABELS.get(kick, kick)}"
+                          + (f"; {blocked} re-arm(s) blocked" if blocked else ""))
 
     if report.get("fire"):
         entry = report["fire"]
         print("\nFire test")
-        print_row("command", f"{entry['player']}A (A8, one pulse) -> 127.0.0.1:{entry['port']}")
+        name = entry.get("command", "A")
+        detail = "A8, one pulse" if name == "A" else name
+        print_row("command", f"{entry['player']}{name} ({detail}) -> 127.0.0.1:{entry['port']}")
         print_row("sent", "yes" if entry["sent"] else "no")
         print_row("outcome", entry["outcome"] or "unknown")
         before, after = entry["state_before"], entry["state_after"]

@@ -484,6 +484,49 @@ def test_own_gun_takes_the_session_over():
         process.terminate()
 
 
+def test_own_gun_blocks_the_firmware_rearm():
+    """F18b: HOTR's ammo arming must not add a second kick to HOTR's own shot."""
+    process, slave, report = start_gun(name="guard")
+    port, log, stop = start_direct_broker(slave, "guard", 45994)
+
+    def state():
+        return read_json(TMP / "run-guard" / "state.json")["players"]["1"]
+
+    def frames():
+        return read_json(report).get("frame_log", [])
+
+    try:
+        client = socket.create_connection(("127.0.0.1", port), 2)
+        if not wait_for(lambda: state()["gun_owned"], 5):
+            raise RuntimeError(f"the session never took the gun over: {state()}")
+        # An ammo game reload arms the firmware's own trigger recoil, and with no
+        # shot frame from HOTR that arming IS the kick, so it must go through.
+        client.sendall(b"1K1\n")
+        if not wait_for(lambda: "aa a4 01 00 00 00 bb" in frames(), 5):
+            raise RuntimeError(f"the ammo path lost its arming frame: {frames()}")
+        if not wait_for(lambda: state()["kick_mode"] == "firmware", 5):
+            raise RuntimeError(f"the ammo session was not recognised: {state()}")
+        # Now HOTR sends its own shot frame: the firmware must not kick as well.
+        client.sendall(b"1A\n")
+        if not wait_for(lambda: state()["kick_mode"] == "hotr", 5):
+            raise RuntimeError(f"the shot frame did not switch the kick to HOTR: {state()}")
+        if not wait_for(lambda: frames().count("aa a4 00 00 00 00 bb") >= 2, 5):
+            raise RuntimeError(f"the armed firmware event was not cleared again: {frames()}")
+        before = state()["sent"]
+        client.sendall(b"1K1\n")
+        if not wait_for(lambda: state().get("suppressed") == 1, 5):
+            raise RuntimeError(f"the re-arm was not swallowed: {state()}")
+        if frames().count("aa a4 01 00 00 00 bb") != 1:
+            raise RuntimeError(f"the firmware was re-armed while HOTR drives the kick: {frames()}")
+        if "not re-arming the firmware's own trigger recoil" not in read_log(log):
+            raise RuntimeError(f"the guard was not logged: {read_log(log)}")
+        if state()["sent"] != before:
+            raise RuntimeError(f"the swallowed re-arm was counted as delivered: {state()}")
+    finally:
+        stop()
+        process.terminate()
+
+
 def test_gunless_session_warns_on_connect():
     """A game that connects with no gun attached must say so out loud."""
     run_dir = TMP / "run-gunless"
@@ -892,6 +935,8 @@ try:
     report("whitelist commands arrive as silent 7-byte frames", test_whitelist_frames_are_silent)
     report("the default backend writes the device directly", test_direct_write_backend)
     report("a game session takes the gun over and hands it back", test_own_gun_takes_the_session_over)
+    report("HOTR's own kicks are never doubled by the firmware",
+           test_own_gun_blocks_the_firmware_rearm)
     report("a game session without a gun says so at connect time",
            test_gunless_session_warns_on_connect)
     report("the direct backend leaves the port and the gun's bytes alone",

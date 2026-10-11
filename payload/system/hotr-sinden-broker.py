@@ -32,6 +32,8 @@ from typing import cast
 
 START = 0xAA
 END = 0xBB
+#: 0xAA, command, four payload bytes, 0xBB.
+FRAME_LENGTH = 7
 
 
 def frame(command: int, *payload: int) -> bytes:
@@ -304,6 +306,13 @@ class GunChannel:
     own_gun: bool = True
     gun_owned: bool = False
     own_pending: bool = False
+    #: F18b: which mechanism kicks for this session ("hotr", "firmware" or
+    #: "unknown"), whether HOTR armed the firmware's own trigger event, and how
+    #: many arming frames the guard swallowed to stop a double kick.
+    kick_mode: str = "unknown"
+    firmware_armed: bool = False
+    suppressed: int = 0
+    suppressed_logged: bool = False
 
     @property
     def direct(self) -> bool:
@@ -352,6 +361,56 @@ class GunChannel:
         self.pty_path = os.ttyname(self.pty_slave)
         logging.info("player %s: physical fd bridged through %s", self.player, self.pty_path)
 
+    def guard_blocks(self, data: bytes, control: bool) -> bool:
+        """F18b: never let the firmware's own recoil double HOTR's kicks.
+
+        HOTR re-arms the firmware's trigger event whenever an ammo game reloads
+        (K1 -> A4 with the trigger bit set), and in an ammo game that arming *is*
+        the kick. Once a session has shown it drives the kick itself (an A8 shot
+        frame), that arming would add a second kick to every shot, so the frame
+        is swallowed with a log line instead of written. Sessions that only ever
+        arm (the ammo path) are untouched.
+        """
+        if control or not self.gun_owned or self.kick_mode != "hotr":
+            return False
+        if len(data) != FRAME_LENGTH or data[1] != 0xA4 or not data[2]:
+            return False
+        self.suppressed += 1
+        if not self.suppressed_logged:
+            self.suppressed_logged = True
+            logging.info(
+                "player %s: not re-arming the firmware's own trigger recoil on %s; "
+                "HOTR sends the kick itself this session",
+                self.player,
+                self.device_path,
+            )
+        return True
+
+    def note_own_frame(self, data: bytes) -> None:
+        """Remember which mechanism kicks for this session (F18b)."""
+        if not self.gun_owned or len(data) != FRAME_LENGTH:
+            return
+        if data[1] == 0xA4:
+            self.firmware_armed = bool(data[2])
+            if self.firmware_armed and self.kick_mode == "unknown":
+                self.kick_mode = "firmware"
+            return
+        if data[1] != 0xA8:
+            return
+        if self.kick_mode != "hotr":
+            self.kick_mode = "hotr"
+            logging.info(
+                "player %s: HOTR sends its own shot frames to %s; the firmware's own "
+                "trigger recoil stays cleared for this session",
+                self.player,
+                self.device_path,
+            )
+        if self.firmware_armed:
+            # HOTR armed the firmware before this session's mode was known: clear
+            # the event bits again so the gun cannot add a kick of its own.
+            self.firmware_armed = False
+            self.send(frame(0xA4, 0, 0, 0, 0), "own-gun-guard", control=True)
+
     def send(self, data: bytes, reason: str, control: bool = False) -> bool:
         """Write one frame and report whether it reached the gun.
 
@@ -366,6 +425,8 @@ class GunChannel:
             self.refused += 1
             self.last_refusal = str(exc)
             logging.error("player %s: refused frame (%s): %s", self.player, reason, exc)
+            return False
+        if self.guard_blocks(data, control):
             return False
         if self.require_tracker and not self.tracker_ready:
             # Option A item 7: a frame sent before LightgunMono finishes its
@@ -414,6 +475,7 @@ class GunChannel:
         if control:
             logging.info("player %s: serial %s (%s)", self.player, data.hex(" "), reason)
             return True
+        self.note_own_frame(data)
         self.sent += 1
         self.last_frame = data.hex(" ")
         self.last_reason = reason
@@ -471,6 +533,9 @@ class GunChannel:
         cleared = self.send(frame(0xA4, 0, 0, 0, 0), "own-gun-mask", control=True)
         self.gun_owned = armed and cleared
         if self.gun_owned:
+            self.kick_mode = "unknown"
+            self.firmware_armed = False
+            self.suppressed_logged = False
             logging.info(
                 "player %s: gun taken over on %s; HOTR decides when it kicks now",
                 self.player,
@@ -484,6 +549,8 @@ class GunChannel:
             return
         self.gun_owned = False
         self.own_pending = False
+        self.kick_mode = "unknown"
+        self.firmware_armed = False
         mask = tracker_recoil_mask(self.device_path) if self.device_path else None
         self.send(frame(0xA4, *(mask or (0, 0, 0, 0))), "release-mask", control=True)
         logging.info("player %s: gun handed back to the tracker's own recoil", self.player)
@@ -828,6 +895,8 @@ class Broker:
                     "tracker_ready": channel.tracker_ready,
                     "tracker_gate": channel.require_tracker,
                     "gun_owned": channel.gun_owned,
+                    "kick_mode": channel.kick_mode,
+                    "suppressed": channel.suppressed,
                     "worker": player in self.workers,
                     "sent": channel.sent,
                     "dropped": channel.dropped,

@@ -11,7 +11,9 @@
 #   6. the tools are wired into install.sh, check-install.sh, uninstall.sh and
 #      the README;
 #   7. install.sh refuses to start when root, x86_64, a required tool or the
-#      free space on /userdata is missing.
+#      free space on /userdata is missing;
+#   8. hotr-sinden-autoconfig keeps a Sinden entry preferring recoil over ammo;
+#   9. the report names the tracker's recoil keys and HOTR's chosen recoil mode.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -497,7 +499,7 @@ def test_autoconfig_creates_the_gun_list():
     if guns[0].strip() != "Light Gun Data File V4":
         raise RuntimeError(f"a fresh gun list must be V4: {guns[:2]!r}")
     block = guns[guns.index("Light Gun #0"):]
-    expected = ["Light Gun #0", "0", "Sinden", "1", "12", "0", "1", "2", "3", "1", "1", "1",
+    expected = ["Light Gun #0", "0", "Sinden", "1", "12", "1", "0", "2", "3", "1", "1", "1",
                 "1", "0", "END_GENERAL_SETTINGS", "13000", "0", "8"]
     if block[:len(expected)] != expected:
         raise RuntimeError(f"the created gun block is wrong: {block[:len(expected)]!r}")
@@ -582,6 +584,79 @@ def test_autoconfig_upgrades_only_the_shipped_default():
         raise RuntimeError(f"a legacy list should be explained, not changed: {result.stderr!r}")
     return ("the unmodified shipped default is upgraded in place; a user-edited legacy list is "
             "reported and left untouched")
+
+
+def test_autoconfig_repairs_the_recoil_mode_order():
+    data = TMP / "autoconfig" / "priority" / "data"
+    data.mkdir(parents=True, exist_ok=True)
+    # A gun list in the order HOTR writes by itself: ammo before recoil.
+    guns = data / "lightguns.hor"
+    guns.write_text("\n".join([
+        "Light Gun Data File V4", "1",
+        "Light Gun #0", "0", "P1Sinden", "1", "12", "0", "1", "2", "3", "1", "1", "1", "1", "0",
+        "END_GENERAL_SETTINGS", "13000", "0", "8", "END_OF_FILE", "",
+    ]), encoding="utf-8")
+    result = _autoconfig(["--data-dir", str(data), "--json"])
+    if result.returncode != 0:
+        raise RuntimeError(f"an existing Sinden entry must be accepted: {result.stderr!r}")
+    lines = guns.read_text(encoding="utf-8").splitlines()
+    start = lines.index("Light Gun #0")
+    block = lines[start:start + 14]
+    # The four numbers after the name are the mode order (ammoValue, recoil, ...).
+    if [block[5], block[6], block[7], block[8]] != ["1", "0", "2", "3"]:
+        raise RuntimeError(f"the Sinden must prefer recoil over ammo: {block!r}")
+    if '"changed": true' not in result.stdout:
+        raise RuntimeError(f"the mode repair must be reported as a change: {result.stdout!r}")
+    again = _autoconfig(["--data-dir", str(data), "--json"])
+    if '"changed": false' not in again.stdout:
+        raise RuntimeError(f"a second repair must change nothing: {again.stdout!r}")
+    kept = guns.read_text(encoding="utf-8").replace("1\n0\n2\n3\n", "0\n1\n2\n3\n")
+    guns.write_text(kept, encoding="utf-8")
+    keep = _autoconfig(["--data-dir", str(data), "--recoil-priority", "keep", "--json"])
+    if keep.returncode != 0 or guns.read_text(encoding="utf-8") != kept:
+        raise RuntimeError("--recoil-priority keep must leave the gun list alone")
+    ammo = _autoconfig(["--data-dir", str(data), "--recoil-priority", "ammo", "--json"])
+    if ammo.returncode != 0 or "0\n1\n2\n3\n" not in guns.read_text(encoding="utf-8"):
+        raise RuntimeError("--recoil-priority ammo must write HOTR's own order back")
+    return ("an existing Sinden entry is switched to recoil-first, a repeat run is a no-op, keep "
+            "leaves the file alone and ammo restores HOTR's own order")
+
+
+def test_fire_refuses_an_unknown_command():
+    completed = subprocess.run(
+        [sys.executable, str(CHECK), "--fire", "--command", "Z", "--json"],
+        text=True, capture_output=True, check=False)
+    report = json.loads(completed.stdout)
+    fire = report.get("fire") or {}
+    if completed.returncode == 0 or fire.get("sent"):
+        raise RuntimeError(f"--fire must fail on a command the broker does not know: {completed.stdout!r}")
+    if "does not accept" not in str(fire.get("outcome")):
+        raise RuntimeError(f"the refusal must name the command: {fire.get('outcome')!r}")
+    return "an unknown --command is refused before any frame is sent"
+
+
+def test_check_reports_the_recoil_programming():
+    root = TMP / "recoil-report"
+    tracker = root / "sinden" / "pabc"
+    tracker.mkdir(parents=True, exist_ok=True)
+    (tracker / "LightgunMono-abc.exe.config").write_text(
+        '<add key="SerialPortWrite" value="/dev/ttyACM0"/>\n'
+        '<add key="EnableRecoil" value="0"/>\n'
+        '<add key="TriggerRecoilNormalOrRepeat" value="1"/>\n'
+        '<add key="AutoRecoilDelayBetweenPulses" value="10"/>\n',
+        encoding="utf-8")
+    log = root / "hook-of-the-reaper.log"
+    log.write_text('Output signal filter: QList("mame_start", "P1_Ammo")\n', encoding="utf-8")
+    completed = subprocess.run(
+        [sys.executable, str(CHECK), "--tracker-root", str(root / "sinden")],
+        text=True, capture_output=True, check=False, env=dict(os.environ, HOTR_LOG=str(log)))
+    if "EnableRecoil=0" not in completed.stdout:
+        raise RuntimeError(f"the report must show the tracker's recoil keys: {completed.stdout!r}")
+    if "TriggerRecoilNormalOrRepeat=1" not in completed.stdout:
+        raise RuntimeError(f"the report must show the repeat mode: {completed.stdout!r}")
+    if "P1_Ammo" not in completed.stdout or "ammo recoil mode" not in completed.stdout:
+        raise RuntimeError(f"the report must name HOTR's own mode choice: {completed.stdout!r}")
+    return "the check names the tracker's recoil keys and HOTR's chosen recoil mode"
 
 
 def test_static_wiring():
@@ -799,6 +874,12 @@ try:
            test_autoconfig_two_guns)
     report("hotr-sinden-autoconfig upgrades only the shipped default gun list",
            test_autoconfig_upgrades_only_the_shipped_default)
+    report("hotr-sinden-autoconfig keeps a Sinden preferring recoil over ammo",
+           test_autoconfig_repairs_the_recoil_mode_order)
+    report("the check names the tracker recoil keys and HOTR's mode",
+           test_check_reports_the_recoil_programming)
+    report("--fire refuses a command the broker does not know",
+           test_fire_refuses_an_unknown_command)
 finally:
     for process in PROCESSES:
         if process.poll() is None:

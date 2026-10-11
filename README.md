@@ -142,17 +142,21 @@ modes a game profile supports against the gun's own recoil priority list (the fo
 of `GunRecoil_PN` and a Sinden then recoils only through firmware trigger recoil, which needs the
 per-game option `Sinden_Trigger_Recoil <0-3>` in the profile. `install.sh` therefore runs
 `hotr-sinden-trigger-recoil` after copying the game files: it adds the option to every game profile
-that counts ammo, leaving profiles without ammo mode and every other line untouched. The step is
-idempotent, so an upgrade never rewrites a profile twice, and it composes with the add-only game
+that counts ammo, leaving profiles without ammo mode and every other line untouched. The option
+only has an effect while a gun's priority list prefers ammo, so on a Sinden it is a safety net
+rather than the normal path. The step is idempotent, so an upgrade never rewrites a profile twice, and it composes with the add-only game
 file install (a profile you already have is never overwritten - only missing files are added).
 It runs at the **end** of the install, after the MSOP step: `scripts/install-mame-msop.sh` ships
 its own copies of 18 MAME game files (Area 51, Time Crisis, Virtua Cop, House of the Dead, …) and
 would otherwise overwrite the option again. `install.sh` therefore verifies the result with
 `--check` afterwards and retries once if any profile still lacks it, and the MSOP step re-patches
 its own copies too, so the install log always ends with the option confirmed present.
-If a Sinden stays silent in an ammo-counting game such as Time Crisis while `hotr-sinden-check`
-looks healthy, make `Recoil` the gun's first recoil priority**and** drop the option again, or run
-`hotr-sinden-trigger-recoil --check` to see which profiles still lack it. Which signals HOTR
+If a Sinden stays silent in an ammo-counting game such as Time Crisis, check which
+mode HOTR chose: `hotr-sinden-check` prints the last `Output signal filter`. A Sinden
+entry created by `hotr-sinden-autoconfig` already prefers recoil, but one made in
+HOTR's own light gun settings may still prefer ammo - make `Recoil` the gun's first
+recoil priority there, or run `hotr-sinden-autoconfig --recoil-priority recoil`.
+`hotr-sinden-trigger-recoil --check` lists the profiles still lacking the option. Which signals HOTR
 registered is logged as `Output signal filter:` in
 `/userdata/system/logs/hook-of-the-reaper.log`, and the acceptance run asserts it.
 
@@ -161,15 +165,28 @@ the broker arms the gun (`A1 01`) and clears the firmware's own trigger event (`
 one shot kicks exactly once - through HOTR - instead of the firmware adding its own kick on top. When
 the game's connection closes the broker hands the gun back to whatever Batocera's tracker programmed.
 Both frames are silent, so aiming is untouched, and how hard the gun kicks is still Batocera's
-`controllers.guns.recoil` option ("RECOIL" in the controller settings menu).
+`controllers.guns.recoil` option ("RECOIL" in the controller settings menu). If HOTR itself arms the
+firmware's trigger recoil (the ammo path, `1K1`), the broker lets that arming through until HOTR
+sends a shot frame of its own; after that it swallows further arming for the rest of the session, so
+one trigger pull can never produce two kicks. Which mechanism is live is written to the state file
+and shown by `hotr-sinden-check` (`kick …`), together with how many arming frames the guard blocked.
 
 Check the setup at any time (read-only, safe to run while playing):
 
 ```sh
 hotr-sinden-check              # report: broker, guns, USB ids, LightgunMono, counters
 hotr-sinden-check --fire       # the same report, plus one recoil pulse (A8) for player 1
+hotr-sinden-check --fire --command 1D   # send one specific broker command instead (D = A3 0)
 hotr-sinden-check --fire --player 2 --json
 ```
+
+The report also names the recoil programming LightgunMono applied to each gun it
+started (`EnableRecoil`, `RecoilTrigger`, `TriggerRecoilNormalOrRepeat`, the
+strengths and delays it wrote into the gun's tracker config) and the mode HOTR
+chose at the last game start (`Output signal filter`), so a silent gun can be told
+apart from a gun that is simply running in the wrong mode. `--command` accepts any
+command the broker already understands and refuses the rest; like `--fire` it
+writes to the gun, so it is not part of the read-only report.
 
 The game files that decide whether HOTR asks for recoil at all are maintained by
 `hotr-sinden-trigger-recoil`:
@@ -230,6 +247,29 @@ hotr-sinden-autoconfig --port 13100       # start from a different port
 It never mixes gun-list formats: a list without `Light Gun Data File V4` (HOTR's
 older layout) is left alone unless it is still the unmodified default that ships
 with HOTR, in which case it is replaced by a V4 list holding the Sinden entry.
+
+The same tool keeps the Sinden entry preferring **recoil** over ammo in the gun's
+own recoil priority list - the four numbers after the gun's name. HOTR runs the
+first mode the game profile supports, and in ammo mode HOTR sends no frame of its
+own: the kick comes from the gun's firmware trigger recoil, which repeats while
+the trigger is held. Recoil-first keeps every Sinden kick on HOTR's single frame
+per shot, and it is what a freshly created entry gets:
+
+```sh
+hotr-sinden-autoconfig --recoil-priority recoil   # default: HOTR sends every kick
+hotr-sinden-autoconfig --recoil-priority ammo     # leave the kick to the gun's firmware
+hotr-sinden-autoconfig --recoil-priority keep     # never touch the order
+```
+
+Only an entry whose name contains `Sinden` is maintained, and only those four
+numbers are ever changed - a gun you renamed is left completely alone. The service
+applies this order on every start, so a Sinden you deliberately want in ammo mode
+has to be renamed (any name without `Sinden` is left alone) or the tool run by
+hand with `--recoil-priority keep`. A gun that
+has to show the ammo count on LEDs (an RS3 Reaper) wants `ammo` instead, so both
+gun types can differ inside the same game: the game profile declares every mode it
+supports and each gun's own priority list decides which one it gets. Which mode
+HOTR actually chose is reported by `hotr-sinden-check` (see below).
 
 **Two guns are matched to players by device order, not by USB id.** Two guns left
 at the factory default report the same USB id, so nothing in the scan can tell them
@@ -329,8 +369,9 @@ bash scripts/tests/hotr-sinden-full-selftest.sh   # sections A and B together
 That runner drives `hotr-sinden-fakegun-selftest.sh` (firmware command table,
 handshake, whitelist silence, direct backend, port/termios/queue discipline,
 syscall log when `strace` is installed, tracker gate, USB ids, chokepoint
-refusals), `hotr-sinden-tools-selftest.sh` (`hotr-sinden-check`,
-`hotr-sinden-disable`, `hotr-status`, the Sinden gun-list autoconfig, the
+refusals, the gun takeover and the double-kick guard), `hotr-sinden-tools-selftest.sh` (`hotr-sinden-check`,
+`hotr-sinden-disable`, `hotr-status`, the Sinden gun-list autoconfig (including
+the recoil-mode order it maintains), the
 trigger-recoil game-file patcher,
 helper-patch revert, the install wiring and the acceptance runner's
 option-parity check), `hotr-sinden-broker-selftest.sh` and
