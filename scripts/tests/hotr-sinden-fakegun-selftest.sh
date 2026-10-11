@@ -443,6 +443,47 @@ def test_direct_write_backend():
         process.terminate()
 
 
+def test_own_gun_takes_the_session_over():
+    """F16: a game session owns the gun's kick and hands it back at the end."""
+    process, slave, report = start_gun(name="own")
+    port, log, stop = start_direct_broker(slave, "own", 45993)
+    try:
+        client = socket.create_connection(("127.0.0.1", port), 2)
+        if not wait_for(lambda: "aa a1 01 00 00 00 bb" in read_json(report).get("frame_log", []), 5):
+            raise RuntimeError(f"the session never armed the recoil latch: {read_json(report)}")
+        frames = read_json(report)["frame_log"]
+        if "aa a4 00 00 00 00 bb" not in frames:
+            raise RuntimeError(f"the tracker's own event kick was not cleared: {frames}")
+        if frames.index("aa a1 01 00 00 00 bb") > frames.index("aa a4 00 00 00 00 bb"):
+            raise RuntimeError(f"the gun was cleared before it was armed: {frames}")
+        state = read_json(TMP / "run-own" / "state.json")["players"]["1"]
+        if not state["gun_owned"]:
+            raise RuntimeError(f"the state file does not report the takeover: {state}")
+        if state["sent"] or state["dropped"] or state["refused"]:
+            raise RuntimeError(f"housekeeping frames were counted as recoil: {state}")
+        # A8 is a direct actuator-queue write, so it must survive the cleared mask.
+        client.sendall(b"1A\n")
+        if not wait_for(lambda: read_json(report).get("frames", {}).get("a8", 0) >= 1, 5):
+            raise RuntimeError(f"HOTR could not fire while it owned the gun: {read_json(report)}")
+        if not wait_for(lambda: read_json(TMP / "run-own" / "state.json")["players"]["1"]["sent"] == 1, 5):
+            raise RuntimeError("the delivered fire frame was never counted")
+        if "gun taken over" not in read_log(log):
+            raise RuntimeError(f"the takeover was not logged: {read_log(log)}")
+        client.close()
+        if not wait_for(
+            lambda: read_json(TMP / "run-own" / "state.json")["players"]["1"]["gun_owned"] is False, 5
+        ):
+            raise RuntimeError("the gun was never handed back when the game ended")
+        released = read_json(report)["frame_log"]
+        if released.count("aa a4 00 00 00 00 bb") < 2:
+            raise RuntimeError(f"the release did not write an event mask back: {released}")
+        if "handed back" not in read_log(log):
+            raise RuntimeError(f"the release was not logged: {read_log(log)}")
+    finally:
+        stop()
+        process.terminate()
+
+
 def test_gunless_session_warns_on_connect():
     """A game that connects with no gun attached must say so out loud."""
     run_dir = TMP / "run-gunless"
@@ -850,6 +891,7 @@ try:
     report("handshake reply matches LightgunMono's verification", test_handshake)
     report("whitelist commands arrive as silent 7-byte frames", test_whitelist_frames_are_silent)
     report("the default backend writes the device directly", test_direct_write_backend)
+    report("a game session takes the gun over and hands it back", test_own_gun_takes_the_session_over)
     report("a game session without a gun says so at connect time",
            test_gunless_session_warns_on_connect)
     report("the direct backend leaves the port and the gun's bytes alone",

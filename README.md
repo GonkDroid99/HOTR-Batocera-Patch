@@ -156,6 +156,13 @@ looks healthy, make `Recoil` the gun's first recoil priority**and** drop the opt
 registered is logged as `Output signal filter:` in
 `/userdata/system/logs/hook-of-the-reaper.log`, and the acceptance run asserts it.
 
+While a game is running, HOTR owns the gun's kick. When the game connects to the broker's TCP port
+the broker arms the gun (`A1 01`) and clears the firmware's own trigger event (`A4 00 00 00 00`), so
+one shot kicks exactly once - through HOTR - instead of the firmware adding its own kick on top. When
+the game's connection closes the broker hands the gun back to whatever Batocera's tracker programmed.
+Both frames are silent, so aiming is untouched, and how hard the gun kicks is still Batocera's
+`controllers.guns.recoil` option ("RECOIL" in the controller settings menu).
+
 Check the setup at any time (read-only, safe to run while playing):
 
 ```sh

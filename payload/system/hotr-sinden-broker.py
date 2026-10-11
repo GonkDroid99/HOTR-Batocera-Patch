@@ -89,6 +89,18 @@ DEFAULT_SINDEN_LOG_MAX_BYTES = 1048576
 SERIAL_PORT_WRITE_RE = re.compile(r'key="SerialPortWrite"\s+value="([^"]+)"')
 TRACKER_POLL_SECONDS = 1.0
 
+#: LightgunMono's own recoil event keys, in A4 payload order: the frame's four
+#: 1-bit fields land in RAM 0x341-0x344 (reference/sinden-firmware-notes.md:176).
+#: F16: with any of them set the firmware kicks on its own, which doubles the
+#: A8 frame HOTR sends for the very same shot.
+TRACKER_RECOIL_EVENT_KEYS = (
+    "RecoilTrigger",
+    "RecoilTriggerOffscreen",
+    "RecoilPumpActionOnEvent",
+    "RecoilPumpActionOffEvent",
+)
+TRACKER_CONFIG_KEY_RE = re.compile(r'key="([^"]+)"\s+value="([^"]*)"')
+
 #: F7: guns are resolved by USB id, never by tty number. The firmware notes
 #: record the same pair for the real hardware.
 SINDEN_USB_IDS = {"16c0:0f39": "1", "16c0:0f01": "2"}
@@ -286,6 +298,12 @@ class GunChannel:
     last_drop: str | None = None
     last_reply: str | None = None
     last_refusal: str | None = None
+    #: F16: whether this session should take the gun over from the tracker's own
+    #: event kick, whether it has managed to, and whether the attempt still has
+    #: to be repeated (the tracker gate can refuse it at connect time).
+    own_gun: bool = True
+    gun_owned: bool = False
+    own_pending: bool = False
 
     @property
     def direct(self) -> bool:
@@ -334,18 +352,29 @@ class GunChannel:
         self.pty_path = os.ttyname(self.pty_slave)
         logging.info("player %s: physical fd bridged through %s", self.player, self.pty_path)
 
-    def send(self, data: bytes, reason: str) -> None:
+    def send(self, data: bytes, reason: str, control: bool = False) -> bool:
+        """Write one frame and report whether it reached the gun.
+
+        ``control`` marks the broker's own housekeeping. Those frames are real
+        writes, but they are not HOTR recoil commands, so the counters and
+        ``last_frame`` keep describing what HOTR actually asked for (which is how
+        hotr-status and the fire test read them).
+        """
         try:
             assert_safe_frame(data)
         except UnsafeFrame as exc:
             self.refused += 1
             self.last_refusal = str(exc)
             logging.error("player %s: refused frame (%s): %s", self.player, reason, exc)
-            return
+            return False
         if self.require_tracker and not self.tracker_ready:
             # Option A item 7: a frame sent before LightgunMono finishes its
             # handshake can land in its protocol window, so early commands are
             # dropped (once, with a reason) instead of queued.
+            if control:
+                # Housekeeping lost a race with a tracker restart: the caller
+                # retries it, and it must not count as a dropped recoil command.
+                return False
             self.dropped += 1
             self.last_drop = f"waiting for LightgunMono on {self.device_path}"
             if not self.tracker_drop_logged:
@@ -356,7 +385,7 @@ class GunChannel:
                     reason,
                     self.device_path,
                 )
-            return
+            return False
         if self.capture:
             with self.capture.open("a", encoding="utf-8") as stream:
                 stream.write(f"player={self.player} reason={reason} data={data.hex(' ')}\n")
@@ -365,10 +394,10 @@ class GunChannel:
                 os.write(self.physical, data)
             except OSError as exc:
                 logging.error("player %s: serial write failed: %s", self.player, exc)
-                return
+                return False
         elif self.device_path is not None:
             if not self.write_direct(data):
-                return
+                return False
         elif not self.simulate:
             # Option A: a player with no gun must be visibly inert, not silently
             # counted as sent, or status/diagnostics would claim recoil worked.
@@ -381,13 +410,17 @@ class GunChannel:
                     self.player,
                     reason,
                 )
-            return
+            return False
+        if control:
+            logging.info("player %s: serial %s (%s)", self.player, data.hex(" "), reason)
+            return True
         self.sent += 1
         self.last_frame = data.hex(" ")
         self.last_reason = reason
         self.last_frame_monotonic = time.monotonic()
         self.last_frame_time = time.strftime("%Y-%m-%dT%H:%M:%S")
         logging.info("player %s: serial %s (%s)", self.player, data.hex(" "), reason)
+        return True
 
     def write_direct(self, data: bytes) -> bool:
         """Write one complete frame and close the device again.
@@ -412,6 +445,48 @@ class GunChannel:
             with suppress(OSError):
                 os.close(fd)
         return True
+
+    def take_gun(self) -> bool:
+        """Take the gun's recoil over for the session a client just opened.
+
+        F16: Batocera's tracker arms the firmware to kick on its own trigger
+        events, so HOTR's A8 doubles every shot. Clearing the event mask (A4 0)
+        leaves HOTR as the only source of kick while the game runs, and arming
+        the latch (A1 1) is what makes the gun accept a recoil frame at all.
+        Strength and delays stay as the tracker programmed them, so the user's
+        controller menu still decides how hard it kicks; A8 is a direct
+        actuator-queue write (reference/sinden-firmware-notes.md:187), not an
+        event, so it is unaffected by the cleared bits. Never A1 0: that is the
+        F9 mute bug (reference/sinden-firmware-notes.md:205).
+        """
+        if not self.own_gun or self.gun_owned or not self.direct:
+            return False
+        if self.require_tracker and not self.tracker_ready:
+            # Arming before LightgunMono finishes its handshake would write inside
+            # its protocol window; refresh_tracker retries the request.
+            self.own_pending = True
+            return False
+        self.own_pending = False
+        armed = self.send(frame(0xA1, 1), "own-gun-arm", control=True)
+        cleared = self.send(frame(0xA4, 0, 0, 0, 0), "own-gun-mask", control=True)
+        self.gun_owned = armed and cleared
+        if self.gun_owned:
+            logging.info(
+                "player %s: gun taken over on %s; HOTR decides when it kicks now",
+                self.player,
+                self.device_path,
+            )
+        return self.gun_owned
+
+    def release_gun(self) -> None:
+        """Hand the gun back to the tracker's own recoil until the next game."""
+        if not self.gun_owned:
+            return
+        self.gun_owned = False
+        self.own_pending = False
+        mask = tracker_recoil_mask(self.device_path) if self.device_path else None
+        self.send(frame(0xA4, *(mask or (0, 0, 0, 0))), "release-mask", control=True)
+        logging.info("player %s: gun handed back to the tracker's own recoil", self.player)
 
     def send_burst(self, packets: list[bytes], reason: str) -> None:
         """Send one command's frames, leaving the F7 gap in direct mode."""
@@ -470,6 +545,33 @@ def tracker_write_ports(root: Path = TRACKER_ROOT) -> dict[str, str]:
         if match:
             ports[canonical_tty(match.group(1))] = str(path)
     return ports
+
+
+def tracker_config_keys(config: Path) -> dict[str, str]:
+    """Read one LightgunMono config's key/value pairs (empty on any problem)."""
+    try:
+        text = config.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return {}
+    return dict(TRACKER_CONFIG_KEY_RE.findall(text))
+
+
+def tracker_recoil_mask(device: str, root: Path = TRACKER_ROOT) -> tuple[int, int, int, int] | None:
+    """The event-kick mask LightgunMono programmed for a tty, or None.
+
+    None means no tracker claims that tty, or the user's controller menu has
+    recoil switched off (``EnableRecoil``), so there is no event kick to restore.
+    """
+    config = tracker_write_ports(root).get(canonical_tty(device))
+    if config is None:
+        return None
+    keys = tracker_config_keys(Path(config))
+    if keys.get("EnableRecoil") != "1":
+        return None
+    return cast(
+        tuple[int, int, int, int],
+        tuple(1 if keys.get(key) == "1" else 0 for key in TRACKER_RECOIL_EVENT_KEYS),
+    )
 
 
 def wants_tracker_gate(device: str, mode: str) -> bool:
@@ -634,6 +736,9 @@ class Broker:
         self.listeners: list[socket.socket] = []
         self.clients: list[socket.socket] = []
         self.workers: dict[str, socket.socket] = {}
+        #: How many live HOTR connections each player has, so the gun is handed
+        #: back only when the last one closes.
+        self.active_players: dict[str, int] = {}
         self.control_socket = control_socket
         self.tracker_root = tracker_root
         self.state_file = state_file
@@ -688,7 +793,14 @@ class Broker:
                     channel.player,
                     channel.device_path,
                 )
+                if channel.own_pending:
+                    # The gate held the ownership override back; a tracker is up
+                    # now, so the handshake has finished and it can be asserted.
+                    channel.take_gun()
             else:
+                # The tracker re-programmed the gun on its way out, or a replug
+                # replaced it, so this session's override has to be taken again.
+                channel.gun_owned = False
                 logging.info(
                     "player %s: no LightgunMono tracker for %s yet; dropping recoil commands",
                     channel.player,
@@ -715,6 +827,7 @@ class Broker:
                     "usb_id": channel.usb_id,
                     "tracker_ready": channel.tracker_ready,
                     "tracker_gate": channel.require_tracker,
+                    "gun_owned": channel.gun_owned,
                     "worker": player in self.workers,
                     "sent": channel.sent,
                     "dropped": channel.dropped,
@@ -781,6 +894,13 @@ class Broker:
         self.selector.register(client, selectors.EVENT_READ, ("client", players, bytearray()))
         self.clients.append(client)
         logging.info("HOTR connected from %s on port %s", address, ",".join(sorted(players)))
+        for player in sorted(players):
+            self.active_players[player] = self.active_players.get(player, 0) + 1
+            channel = self.channels.get(player)
+            if channel is not None:
+                # A game is starting: from here HOTR decides when the gun kicks,
+                # instead of the firmware's own trigger event doubling every shot.
+                channel.take_gun()
         # A game has just started (HOTR connects on game start): say plainly when
         # there is no gun to write to, instead of silently dropping every pull.
         for player in self.gunless_players(players):
@@ -788,6 +908,21 @@ class Broker:
                 "player %s: no Sinden gun is attached; recoil will be dropped for this session",
                 player,
             )
+        # The takeover is a state change HOTR's own diagnostics read back, so
+        # publish it now instead of waiting for the next poll tick.
+        self.write_state()
+
+    def client_closed(self, player: str) -> None:
+        """Hand the gun back once this player's last connection has gone."""
+        remaining = self.active_players.get(player, 0) - 1
+        if remaining > 0:
+            self.active_players[player] = remaining
+            return
+        self.active_players.pop(player, None)
+        channel = self.channels.get(player)
+        if channel is not None:
+            channel.release_gun()
+        self.write_state()
 
     def gunless_players(self, players: set[str]) -> list[str]:
         """Players in ``players`` that currently have nowhere to write to."""
@@ -826,6 +961,11 @@ class Broker:
                 except OSError:
                     logging.warning("worker for player %s is unavailable", player)
             elif channel:
+                if self.active_players.get(player) and not channel.gun_owned:
+                    # A tracker restart or a replug re-programmed the gun, which
+                    # drops the override; it belongs to the live session, so put
+                    # it back before the frame that proves it matters.
+                    channel.take_gun()
                 channel.send_burst(packets, command)
             else:
                 logging.warning("no active Sinden channel for player %s", player)
@@ -858,6 +998,10 @@ class Broker:
                     if not data:
                         self.selector.unregister(client)
                         client.close()
+                        if client in self.clients:
+                            self.clients.remove(client)
+                        for player in sorted(players):
+                            self.client_closed(player)
                         continue
                     buffer.extend(data)
                     while b"\n" in buffer:
@@ -1013,6 +1157,12 @@ def main() -> int:
     )
     parser.add_argument("--simulate", action="store_true")
     parser.add_argument(
+        "--own-gun",
+        choices=("on", "off"),
+        default="on",
+        help="take the gun over from the tracker's own recoil events while HOTR plays (default on)",
+    )
+    parser.add_argument(
         "--tracker-root",
         type=Path,
         default=TRACKER_ROOT,
@@ -1078,6 +1228,7 @@ def main() -> int:
             simulate=args.simulate,
             capture=args.capture,
             require_tracker=device is not None and wants_tracker_gate(device, args.tracker_gate),
+            own_gun=args.own_gun == "on",
             usb_id=usb,
         )
 
