@@ -46,7 +46,7 @@ fi
 rm -rf /userdata/saves/mame/plugins/stateoutput
 rm -f /etc/udev/rules.d/99-hotr.rules /etc/udev/rules.d/99-retroshooter-joystick-override.rules
 rm -f /usr/bin/batocera-config-duckstation-hotr /usr/bin/batocera-config-pcsx2-hotr /usr/bin/batocera-config-hotr /usr/bin/hotr-gun-assignment
-rm -f /usr/bin/hotr-sinden-check /usr/bin/hotr-sinden-disable /usr/bin/hotr-sinden-trigger-recoil
+rm -f /usr/bin/hotr-sinden-check /usr/bin/hotr-sinden-disable /usr/bin/hotr-sinden-trigger-recoil /usr/bin/hotr-sinden-autoconfig
 # Batocera 43 has no batocera_launch package; an empty lookup is normal.
 LAUNCH_ROOT="$(printf '%s\n' /usr/lib/python*/site-packages/batocera_launch | sort -V | while read -r candidate; do [ -d "$candidate" ] && printf '%s\n' "$candidate"; done | tail -n1 || true)"
 if [ -n "$LAUNCH_ROOT" ]; then

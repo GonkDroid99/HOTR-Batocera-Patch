@@ -16,9 +16,11 @@ check_exec /userdata/system/hotr/bin/hotr-sinden-broker.py
 check_exec /userdata/system/hotr/bin/hotr-sinden-check
 check_exec /userdata/system/hotr/bin/hotr-sinden-disable
 check_exec /userdata/system/hotr/bin/hotr-sinden-trigger-recoil
+check_exec /userdata/system/hotr/bin/hotr-sinden-autoconfig
 check_exec /usr/bin/hotr-sinden-check
 check_exec /usr/bin/hotr-sinden-disable
 check_exec /usr/bin/hotr-sinden-trigger-recoil
+check_exec /usr/bin/hotr-sinden-autoconfig
 check_exec /userdata/system/hotr/tools/hotr-debug-report.sh
 check_exec /userdata/system/hotr/tools/hotr-monitor
 check_exec /userdata/system/hotr/tools/hotr-sinden-full-selftest.sh

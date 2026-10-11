@@ -5,6 +5,9 @@ ROOT=/userdata/system/hotr
 APPDIR="$ROOT/software/hook-of-the-reaper"
 DAEMON="$APPDIR/hook-of-the-reaper"
 SINDEN_BROKER="$ROOT/bin/hotr-sinden-broker.py"
+# HOTR only drives guns that are on its own list; this tool keeps one Sinden
+# entry (and a player assignment) there so a Sinden box needs no UI visit.
+SINDEN_AUTOCONFIG="$ROOT/bin/hotr-sinden-autoconfig"
 LOGFILE=/userdata/system/logs/hook-of-the-reaper.log
 SINDEN_LOG=/userdata/system/logs/hotr-sinden-broker.log
 SINDEN_PID=/var/run/hotr-sinden-broker.pid
@@ -94,6 +97,12 @@ start_sinden_broker() {
   fi
   rm -f "$SINDEN_PID"
   rotate_file "$SINDEN_LOG"
+  # HOTR's gun list lives in the same data directory as the broker config. Make
+  # sure our Sinden gun is on it before the daemon reads it; this is a no-op once
+  # the entry exists and never rewrites a gun list the user has edited.
+  if [ -x "$SINDEN_AUTOCONFIG" ]; then
+    "$SINDEN_AUTOCONFIG" --auto --data-dir "$DATADIR" >>"$SINDEN_LOG" 2>&1 || true
+  fi
   # 13000 is HOTR's documented default. Configured Sinden profiles may add a
   # second port; the broker reads those from lightguns.hor as well.
   BROKER_ARGS=(--config "$DATADIR/lightguns.hor" --port 13000 --log "$SINDEN_LOG")

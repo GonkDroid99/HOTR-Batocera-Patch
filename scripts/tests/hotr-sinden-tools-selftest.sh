@@ -67,6 +67,8 @@ STATUS = resolve(ROOT / "scripts/hotr-status", ROOT / "tools/hotr-status",
 TRIGGER_RECOIL = resolve(ROOT / "payload/system/hotr-sinden-trigger-recoil",
                          ROOT / "bin/hotr-sinden-trigger-recoil",
                          Path("/usr/bin/hotr-sinden-trigger-recoil"))
+AUTOCONFIG = resolve(ROOT / "scripts/hotr-sinden-autoconfig", ROOT / "bin/hotr-sinden-autoconfig",
+                     Path("/usr/bin/hotr-sinden-autoconfig"))
 HELPER = resolve(ROOT / "buildroot/src/batocera.linux-43/package/batocera/controllers/guns/sinden-guns/virtual-sindenlightgun-add",
                  Path("/usr/bin/virtual-sindenlightgun-add"))
 TMP = Path(tempfile.mkdtemp(prefix="hotr-sinden-tools-"))
@@ -473,14 +475,125 @@ def test_trigger_recoil_patcher():
             "repeat runs change nothing, a clobbered file is re-patched")
 
 
+def _autoconfig(arguments):
+    return subprocess.run([sys.executable, str(AUTOCONFIG), *arguments],
+                          text=True, capture_output=True, check=False)
+
+
+def _write_stub_broker(path, players):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    body = ", ".join(f'"{player}": "{device}"' for player, device in players.items())
+    path.write_text(f"def discover_devices(*args, **kwargs):\n    return {{{body}}}\n",
+                    encoding="utf-8")
+    return path
+
+
+def test_autoconfig_creates_the_gun_list():
+    data = TMP / "autoconfig" / "fresh"
+    result = _autoconfig(["--data-dir", str(data), "--json"])
+    if result.returncode != 0:
+        raise RuntimeError(f"a fresh data dir should be configured: {result.returncode}: {result.stderr}")
+    guns = (data / "lightguns.hor").read_text(encoding="utf-8").splitlines()
+    if guns[0].strip() != "Light Gun Data File V4":
+        raise RuntimeError(f"a fresh gun list must be V4: {guns[:2]!r}")
+    block = guns[guns.index("Light Gun #0"):]
+    expected = ["Light Gun #0", "0", "Sinden", "1", "12", "0", "1", "2", "3", "1", "1", "1",
+                "1", "0", "END_GENERAL_SETTINGS", "13000", "0", "8"]
+    if block[:len(expected)] != expected:
+        raise RuntimeError(f"the created gun block is wrong: {block[:len(expected)]!r}")
+    if guns[1].strip() != "1" or guns[-1].strip() != "END_OF_FILE":
+        raise RuntimeError(f"the gun count or terminator is wrong: {guns[:2]!r} {guns[-1]!r}")
+    assignments = (data / "playersAss.hor").read_text(encoding="utf-8").splitlines()
+    # A slot holds the gun index, not the player number (hotr-gun-assignment
+    # writes values[player - 1] = gun), so player 1 in gun 0 is a plain "0".
+    if assignments[:2] != ["Player Assignments", "0"]:
+        raise RuntimeError(f"player 1 was not assigned to the new gun: {assignments!r}")
+    if assignments[2:-1] != ["69"] * 7 or assignments[-1] != "END_OF_FILE":
+        raise RuntimeError(f"every other player must stay unassigned: {assignments!r}")
+
+    before = ((data / "lightguns.hor").read_bytes(), (data / "playersAss.hor").read_bytes())
+    again = _autoconfig(["--data-dir", str(data), "--json"])
+    after = ((data / "lightguns.hor").read_bytes(), (data / "playersAss.hor").read_bytes())
+    if again.returncode != 0 or before != after or '"changed": false' not in again.stdout:
+        raise RuntimeError(f"a second run must change nothing and say so: {again.stdout!r}")
+    return ("a fresh install gets a V4 Sinden entry on 13000 assigned to player 1, and a second run "
+            "is a no-op")
+
+
+def test_autoconfig_two_guns():
+    root = TMP / "autoconfig"
+    stub = _write_stub_broker(root / "stub-two.py", {"1": "/dev/ttyACM0", "2": "/dev/ttyACM1"})
+    data = root / "two"
+    result = _autoconfig(["--auto", "--broker", str(stub), "--data-dir", str(data), "--json"])
+    if result.returncode != 0:
+        raise RuntimeError(f"a two-gun box should be configured: {result.stderr!r}")
+    guns = (data / "lightguns.hor").read_text(encoding="utf-8").splitlines()
+    if guns[1].strip() != "2":
+        raise RuntimeError(f"the gun count must be 2: {guns[:3]!r}")
+    first = guns[guns.index("Light Gun #0"):guns.index("Light Gun #1")]
+    second = guns[guns.index("Light Gun #1"):]
+    if [first[2], first[15], first[16]] != ["Sinden", "13000", "0"]:
+        raise RuntimeError(f"gun 0 must be player 1 on 13000: {first!r}")
+    if [second[2], second[15], second[16]] != ["Sinden2", "13001", "1"]:
+        raise RuntimeError(f"gun 1 must be player 2 on 13001: {second!r}")
+    assignments = (data / "playersAss.hor").read_text(encoding="utf-8").splitlines()
+    if assignments[:3] != ["Player Assignments", "0", "1"] or assignments[3] != "69":
+        raise RuntimeError(f"both players must be assigned (slots hold gun indexes): {assignments!r}")
+
+    # A broker that cannot answer is a fallback, never a failure.
+    broken = _write_stub_broker(root / "stub-broken.py", {})
+    broken.write_text("def discover_devices(*args, **kwargs):\n    raise RuntimeError('boom')\n",
+                      encoding="utf-8")
+    data3 = root / "broken"
+    result = _autoconfig(["--auto", "--broker", str(broken), "--data-dir", str(data3)])
+    if result.returncode != 0 or "boom" not in result.stderr:
+        raise RuntimeError(f"an unusable broker must still leave one usable entry: {result!r}")
+    if not (data3 / "lightguns.hor").is_file():
+        raise RuntimeError("the fallback must still create the player 1 entry")
+    return ("two attached guns get consecutive ports 13000/13001 with players 1 and 2, both "
+            "assigned, and a broker that cannot answer falls back to one gun")
+
+
+def test_autoconfig_upgrades_only_the_shipped_default():
+    root = TMP / "autoconfig" / "legacy"
+    root.mkdir(parents=True, exist_ok=True)
+    serial = ["0", "12", "0", "1", "2", "3", "1", "1", "1", "1", "0", "END_GENERAL_SETTINGS"]
+    pristine = root / "pristine.hor"
+    pristine.write_text(
+        "\n".join(["Light Gun #0", *serial, "/dev/ttyUSB1", "0", "8",
+                   "Light Gun #1", *serial, "/dev/ttyUSB3", "1", "8", "END_OF_FILE", ""]),
+        encoding="utf-8")
+    guns = root / "data" / "lightguns.hor"
+    guns.parent.mkdir(parents=True, exist_ok=True)
+    guns.write_text(pristine.read_text(encoding="utf-8"), encoding="utf-8")
+    result = _autoconfig(["--data-dir", str(guns.parent), "--pristine-default", str(pristine)])
+    upgraded = guns.read_text(encoding="utf-8")
+    if result.returncode != 0 or "Light Gun Data File V4" not in upgraded or "13000" not in upgraded:
+        raise RuntimeError(f"the shipped default must be replaced by a V4 Sinden entry: {upgraded!r}")
+    if "ttyUSB" in upgraded:
+        raise RuntimeError("the generic placeholder guns must not survive the rewrite")
+
+    edited = pristine.read_text(encoding="utf-8").replace("/dev/ttyUSB1", "/dev/ttyACM9")
+    guns.write_text(edited, encoding="utf-8")
+    result = _autoconfig(["--data-dir", str(guns.parent), "--pristine-default", str(pristine)])
+    if guns.read_text(encoding="utf-8") != edited:
+        raise RuntimeError("a user-edited legacy gun list must never be rewritten")
+    if result.returncode != 0 or "lightguns.hor" not in result.stderr:
+        raise RuntimeError(f"a legacy list should be explained, not changed: {result.stderr!r}")
+    return ("the unmodified shipped default is upgraded in place; a user-edited legacy list is "
+            "reported and left untouched")
+
+
 def test_static_wiring():
     if not (ROOT / "install.sh").is_file():
         raise SkipCheck("the repository sources are not part of an installed system")
     install = (ROOT / "install.sh").read_text(encoding="utf-8")
     for expected in ('"$BASE/scripts/hotr-sinden-check" "$HOTR/bin/hotr-sinden-check"',
                      '"$BASE/scripts/hotr-sinden-disable" "$HOTR/bin/hotr-sinden-disable"',
+                     '"$BASE/scripts/hotr-sinden-autoconfig" "$HOTR/bin/hotr-sinden-autoconfig"',
                      '"$BASE/scripts/hotr-sinden-check" /usr/bin/hotr-sinden-check',
                      '"$BASE/scripts/hotr-sinden-disable" /usr/bin/hotr-sinden-disable',
+                     '"$BASE/scripts/hotr-sinden-autoconfig" /usr/bin/hotr-sinden-autoconfig',
                      '"$BASE/payload/system/hotr-sinden-trigger-recoil" "$HOTR/bin/hotr-sinden-trigger-recoil"',
                      '"$BASE/payload/system/hotr-sinden-trigger-recoil" /usr/bin/hotr-sinden-trigger-recoil'):
         if expected not in install:
@@ -503,23 +616,38 @@ def test_static_wiring():
     if "hotr-sinden-trigger-recoil" not in msop:
         raise RuntimeError("install-mame-msop.sh overwrites game files without re-adding the "
                            "Sinden trigger recoil option")
+    # The gun list is HOTR's own file, so the entry has to exist before anything
+    # reads it: install.sh adds it for the whole install, the service adds it on
+    # every start (which is also what re-checks it after a gun is replugged).
+    if "configure_sinden_gun(){" not in install or "\nconfigure_sinden_gun\n" not in install:
+        raise RuntimeError("install.sh does not define and call configure_sinden_gun")
+    if '"$tool" --auto' not in install:
+        raise RuntimeError("install.sh must configure one gun entry per attached gun")
+    service = (ROOT / "scripts/hotr-service").read_text(encoding="utf-8")
+    if 'SINDEN_AUTOCONFIG="$ROOT/bin/hotr-sinden-autoconfig"' not in service:
+        raise RuntimeError("scripts/hotr-service does not ship hotr-sinden-autoconfig")
+    if '"$SINDEN_AUTOCONFIG" --auto --data-dir "$DATADIR"' not in service:
+        raise RuntimeError("scripts/hotr-service must keep the gun list correct on every start")
     checker = (ROOT / "check-install.sh").read_text(encoding="utf-8")
     for expected in ("check_exec /userdata/system/hotr/bin/hotr-sinden-check",
                      "check_exec /userdata/system/hotr/bin/hotr-sinden-disable",
+                     "check_exec /userdata/system/hotr/bin/hotr-sinden-autoconfig",
+                     "check_exec /usr/bin/hotr-sinden-autoconfig",
                      "check_exec /usr/bin/hotr-sinden-trigger-recoil",
                      "hotr-sinden-trigger-recoil --check --quiet"):
         if expected not in checker:
             raise RuntimeError(f"check-install.sh does not {expected}")
     uninstall = (ROOT / "uninstall.sh").read_text(encoding="utf-8")
     for expected in ("/usr/bin/hotr-sinden-check", "/usr/bin/hotr-sinden-disable",
-                     "/usr/bin/hotr-sinden-trigger-recoil"):
+                     "/usr/bin/hotr-sinden-autoconfig", "/usr/bin/hotr-sinden-trigger-recoil"):
         if expected not in uninstall:
             raise RuntimeError(f"uninstall.sh does not remove {expected}")
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    for expected in ("hotr-sinden-check", "hotr-sinden-disable", "hotr-sinden-trigger-recoil"):
+    for expected in ("hotr-sinden-check", "hotr-sinden-disable", "hotr-sinden-autoconfig",
+                     "hotr-sinden-trigger-recoil"):
         if expected not in readme:
             raise RuntimeError(f"README.md does not document {expected}")
-    return "install, check-install, uninstall and README all reference all three tools"
+    return "install, check-install, uninstall, the service and the README all reference all four tools"
 
 
 def test_runner_flags_are_implemented():
@@ -665,6 +793,12 @@ try:
            test_install_preflight)
     report("ammo-mode game files get the Sinden trigger recoil option",
            test_trigger_recoil_patcher)
+    report("hotr-sinden-autoconfig creates the Sinden entry and the player assignment",
+           test_autoconfig_creates_the_gun_list)
+    report("hotr-sinden-autoconfig gives every attached gun its own entry",
+           test_autoconfig_two_guns)
+    report("hotr-sinden-autoconfig upgrades only the shipped default gun list",
+           test_autoconfig_upgrades_only_the_shipped_default)
 finally:
     for process in PROCESSES:
         if process.poll() is None:

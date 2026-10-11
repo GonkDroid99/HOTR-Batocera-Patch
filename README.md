@@ -212,6 +212,25 @@ one `PLAYER=/dev/path` line per gun into
 devices are used instead of the USB-id scan, and `hotr-sinden-check` reports
 them. Delete the file to go back to automatic detection.
 
+The gun still has to be on HOTR's own list (`data/lightguns.hor`), which used to
+mean one trip through HOTR's light gun settings. `install.sh` and
+`scripts/hotr-service` now write that entry themselves with
+`hotr-sinden-autoconfig --auto`: it asks the broker which players have a gun
+attached and ensures one entry per gun - player 1 on TCP `13000`, player 2 on
+`13001` - plus the matching player assignment in `playersAss.hor`. An entry that
+already serves a gun, and every assignment you made yourself, are left exactly as
+they are, so re-running it is a no-op:
+
+```sh
+hotr-sinden-autoconfig --auto --dry-run   # show what would change, change nothing
+hotr-sinden-autoconfig --auto             # ensure one entry per attached gun
+hotr-sinden-autoconfig --port 13100       # start from a different port
+```
+
+It never mixes gun-list formats: a list without `Light Gun Data File V4` (HOTR's
+older layout) is left alone unless it is still the unmodified default that ships
+with HOTR, in which case it is replaced by a V4 list holding the Sinden entry.
+
 **Two guns are matched to players by device order, not by USB id.** Two guns left
 at the factory default report the same USB id, so nothing in the scan can tell them
 apart and `player 1`/`player 2` follow the order of `/dev/ttyACM*`. That order can
@@ -311,7 +330,8 @@ That runner drives `hotr-sinden-fakegun-selftest.sh` (firmware command table,
 handshake, whitelist silence, direct backend, port/termios/queue discipline,
 syscall log when `strace` is installed, tracker gate, USB ids, chokepoint
 refusals), `hotr-sinden-tools-selftest.sh` (`hotr-sinden-check`,
-`hotr-sinden-disable`, `hotr-status`, the trigger-recoil game-file patcher,
+`hotr-sinden-disable`, `hotr-status`, the Sinden gun-list autoconfig, the
+trigger-recoil game-file patcher,
 helper-patch revert, the install wiring and the acceptance runner's
 option-parity check), `hotr-sinden-broker-selftest.sh` and
 `hotr-sinden-worker-selftest.sh`.

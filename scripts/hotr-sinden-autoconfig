@@ -1,0 +1,505 @@
+#!/usr/bin/env python3
+"""Make a Sinden gun usable in HOTR without opening the UI.
+
+HOTR keeps its own gun list in ``lightguns.hor`` next to the game profiles; the
+broker can talk to a Sinden gun all day, but HOTR only drives the gun it has on
+that list.  Everything else about Sinden support is automatic (the broker finds
+the gun by USB vendor id, serves it on a TCP port and owns the gun's kick while
+a game runs), so this tool closes the last manual step: it guarantees one Sinden
+entry in the gun list and a player assignment for it.
+
+It is deliberately conservative:
+
+* an existing entry is never touched or duplicated -- a TCP port that already
+  serves a gun is left exactly as it is (only reported);
+* an existing player assignment is never overwritten;
+* with ``--auto`` it asks the broker which players have a gun attached and
+  ensures one entry per gun, so one gun gives player 1 on the base port and two
+  guns give players 1 and 2 on consecutive ports, each with its own assignment;
+* a *legacy* gun list (anything that does not declare ``Light Gun Data File
+  V4``) is left alone unless it is byte-for-byte the unmodified default that
+  ships with HOTR, in which case it holds only HOTR's generic USB placeholders
+  and is rewritten -- a user-edited list is always reported instead;
+* the file is rewritten atomically and a failed run changes nothing.
+
+Usage::
+
+    hotr-sinden-autoconfig --auto [--data-dir DIR] [--port 13000]
+    hotr-sinden-autoconfig [--data-dir DIR] [--port 13000] [--player 1]
+                           [--name Sinden] [--recoil-voltage 8]
+                           [--pristine-default FILE] [--dry-run] [--json] [-q]
+
+Exit status is 0 whenever the gun list ends up usable (a change was made, or it
+already was), 1 only when the tool could not read or write the gun list.
+"""
+
+from __future__ import annotations
+
+import argparse
+import importlib.util
+import json
+import os
+import re
+import sys
+import tempfile
+from pathlib import Path
+
+DEFAULT_DATA_DIR = Path(
+    os.environ.get("HOTR_DATA_DIR") or "/userdata/system/hook-of-the-reaper/data"
+)
+GUNS_FILE = "lightguns.hor"
+ASSIGNMENTS_FILE = "playersAss.hor"
+
+# The header HOTR writes for a modern gun list.  Older lists have no gun name
+# line and a different per-gun trailer, so they are never patched in place.
+MODERN_HEADER = "Light Gun Data File V4"
+GUN_HEADER_RE = re.compile(r"^Light Gun #(\d+)\s*$")
+END_GENERAL = "END_GENERAL_SETTINGS"
+END_OF_FILE = "END_OF_FILE"
+FILE_END = "END_OF_FILE"
+
+UNASSIGNED = 69
+ASSIGNMENT_SLOTS = 8
+
+# Ground truth taken from a gun list HOTR's own UI wrote for a Sinden gun: the
+# general settings block, then the TCP server block (port, player, voltage).
+GUN_BLOCK = """\
+Light Gun #{index}
+{index}
+{name}
+1
+12
+0
+1
+2
+3
+1
+1
+1
+1
+0
+END_GENERAL_SETTINGS
+{port}
+{player}
+{voltage}
+"""
+
+
+class Autoconfig:
+    """Apply the Sinden entry to a HOTR data directory."""
+
+    def __init__(self, args: argparse.Namespace) -> None:
+        self.args = args
+        self.data_dir = Path(args.data_dir)
+        self.guns_path = self.data_dir / GUNS_FILE
+        self.assignments_path = self.data_dir / ASSIGNMENTS_FILE
+        self.player = int(args.player)
+        self.port = int(args.port)
+        self.actions: list[str] = []
+        self.notes: list[str] = []
+        self.changed = False
+        self.total_changed = False
+        self.lines: list[str] = []
+
+    # -- reporting ---------------------------------------------------------
+    def log(self, message: str) -> None:
+        self.actions.append(message)
+        if not self.args.quiet:
+            print(message)
+
+    def note(self, message: str) -> None:
+        self.notes.append(message)
+
+    # -- gun list ----------------------------------------------------------
+    def read_guns(self) -> str | None:
+        try:
+            return self.guns_path.read_text(encoding="utf-8", errors="replace")
+        except FileNotFoundError:
+            return None
+        except OSError as exc:
+            self.note(f"cannot read {self.guns_path}: {exc}")
+            return None
+
+    @staticmethod
+    def parse_entries(lines: list[str]) -> list[dict[str, object]]:
+        """Split a modern gun list into its gun entries.
+
+        Each entry records the header line number, the gun's index, its name
+        (when the layout has one) and the connection lines that follow
+        ``END_GENERAL_SETTINGS``.
+        """
+        entries: list[dict[str, object]] = []
+        current: dict[str, object] | None = None
+        for number, line in enumerate(lines):
+            stripped = line.strip()
+            match = GUN_HEADER_RE.match(stripped)
+            if match:
+                if current is not None:
+                    entries.append(current)
+                current = {
+                    "header": number,
+                    "index": int(match.group(1)),
+                    "name": "",
+                    "index_line": None,
+                    "connection": [],
+                }
+                continue
+            if current is None:
+                continue
+            if stripped == END_GENERAL:
+                current["after_general"] = number
+                continue
+            if "after_general" in current:
+                if stripped == END_OF_FILE:
+                    continue
+                connection = current["connection"]
+                assert isinstance(connection, list)
+                connection.append(stripped)
+                continue
+            if stripped == END_OF_FILE:
+                continue
+            if "after_general" not in current:
+                if current["index_line"] is None:
+                    current["index_line"] = number
+                elif not current["name"]:
+                    current["name"] = stripped
+        if current is not None:
+            entries.append(current)
+        return entries
+
+    @staticmethod
+    def entry_port(entry: dict[str, object]) -> str:
+        """The TCP port a modern entry serves, or "" for a serial gun."""
+        connection = entry.get("connection") or []
+        assert isinstance(connection, list)
+        if connection and str(connection[0]).isdigit():
+            port = int(str(connection[0]))
+            if 1024 <= port <= 65535:
+                return str(port)
+        return ""
+
+    def apply_modern(self, text: str) -> None:
+        lines = text.splitlines()
+        if not lines or lines[0].strip() != MODERN_HEADER:
+            raise ValueError("not a modern gun list")
+        self.lines = lines
+        entries = self.parse_entries(lines)
+        # The TCP port is what identifies the entry: HOTR serves each gun on its
+        # own port, so a list that already serves ours needs no change at all.
+        existing = next(
+            (entry for entry in entries if self.entry_port(entry) == str(self.port)), None
+        )
+        if existing is not None:
+            kind = "Sinden gun" if "sinden" in str(existing.get("name", "")).lower() else "gun"
+            self.log(
+                f"{self.guns_path}: TCP {self.port} already serves a {kind} "
+                f"({existing.get('name') or 'unnamed'}); left as it is"
+            )
+            if self.args.assign_player:
+                self.apply_assignment(int(existing.get("index", 0)))
+            return
+
+        index = self.new_index(entries)
+        block = GUN_BLOCK.format(
+            index=index,
+            name=self.args.name,
+            port=self.port,
+            player=self.player - 1,
+            voltage=self.args.recoil_voltage,
+        )
+        if entries:
+            self.set_gun_count(len(entries) + 1)
+            self.insert_block(block)
+            self.log(f"{self.guns_path}: added gun {index} ({self.args.name} on TCP {self.port})")
+        else:
+            self.lines = [MODERN_HEADER, "1", *block.splitlines(), END_OF_FILE]
+            self.log(f"{self.guns_path}: created with gun 0 ({self.args.name} on TCP {self.port})")
+        self.changed = True
+        if self.args.assign_player:
+            self.apply_assignment(index)
+
+    def set_gun_count(self, count: int) -> None:
+        for number in range(1, min(len(self.lines), 6)):
+            if self.lines[number].strip().isdigit():
+                self.lines[number] = str(count)
+                return
+
+    def new_index(self, entries: list[dict[str, object]]) -> int:
+        used = {int(entry["index"]) for entry in entries if isinstance(entry.get("index"), int)}
+        index = 0
+        while index in used:
+            index += 1
+        return index
+
+    def insert_block(self, block: str) -> None:
+        if self.lines and self.lines[-1].strip() == END_OF_FILE:
+            self.lines = [*self.lines[:-1], *block.splitlines(), self.lines[-1]]
+        else:
+            self.lines = [*self.lines, *block.splitlines(), END_OF_FILE]
+
+    def replace_pristine_default(self, text: str) -> bool:
+        """Rewrite an untouched legacy default gun list as a modern one.
+
+        The shipped default lists HOTR's generic USB placeholders only, so when
+        a box still has it verbatim there is nothing of the user's to lose.
+        """
+        pristine = self.args.pristine_default
+        if not pristine:
+            return False
+        try:
+            expected = Path(pristine).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return False
+        if expected != text:
+            self.note(
+                f"{self.guns_path} is a legacy gun list with local changes; add a Sinden "
+                "gun once in HOTR's light gun settings (or start from the shipped default)"
+            )
+            return False
+        block = GUN_BLOCK.format(
+            index=0,
+            name=self.args.name,
+            port=self.port,
+            player=self.player - 1,
+            voltage=self.args.recoil_voltage,
+        )
+        self.lines = [MODERN_HEADER, "1", *block.splitlines(), END_OF_FILE]
+        self.changed = True
+        self.log(
+            f"{self.guns_path}: replaced the untouched default gun list "
+            f"(generic USB placeholders) with gun 0 ({self.args.name} on TCP {self.port})"
+        )
+        if self.args.assign_player:
+            self.apply_assignment(0)
+        return True
+
+    def write_guns(self) -> bool:
+        if self.args.dry_run and self.lines:
+            # A dry run must not chain against a file it never wrote, so the
+            # second gun is applied to the first gun's in-memory result.
+            text: str | None = "\n".join(self.lines) + "\n"
+        else:
+            text = self.read_guns()
+        if text is None:
+            self.lines = [
+                MODERN_HEADER,
+                "1",
+                *GUN_BLOCK.format(
+                    index=0,
+                    name=self.args.name,
+                    port=self.port,
+                    player=self.player - 1,
+                    voltage=self.args.recoil_voltage,
+                ).splitlines(),
+                END_OF_FILE,
+            ]
+            self.changed = True
+            self.log(f"{self.guns_path}: created with gun 0 ({self.args.name} on TCP {self.port})")
+            if self.args.assign_player:
+                self.apply_assignment(0)
+            return True if self.args.dry_run else self.flush()
+
+        version = text.splitlines()[0].strip() if text.strip() else ""
+        if version != MODERN_HEADER:
+            if not self.replace_pristine_default(text):
+                return True
+            return True if self.args.dry_run else self.flush()
+
+        self.apply_modern(text)
+        if not self.changed:
+            return True
+        return True if self.args.dry_run else self.flush()
+
+    def flush(self) -> bool:
+        try:
+            self.data_dir.mkdir(parents=True, exist_ok=True)
+            with tempfile.NamedTemporaryFile(
+                "w", encoding="utf-8", dir=self.data_dir, delete=False
+            ) as handle:
+                handle.write("\n".join(self.lines) + "\n")
+                temporary = handle.name
+            os.replace(temporary, self.guns_path)
+        except OSError as exc:
+            self.note(f"cannot write {self.guns_path}: {exc}")
+            return False
+        return True
+
+    # -- player assignment -------------------------------------------------
+    def apply_assignment(self, gun_index: int) -> None:
+        slot = self.player - 1
+        try:
+            text = self.assignments_path.read_text(encoding="utf-8", errors="replace")
+        except FileNotFoundError:
+            text = ""
+        except OSError as exc:
+            self.note(f"cannot read {self.assignments_path}: {exc}")
+            return
+        lines = text.splitlines()
+        if lines and lines[0].strip():
+            body = lines[1:]
+            while body and body[-1].strip() == END_OF_FILE:
+                body.pop()
+            slots = [line.strip() for line in body]
+        else:
+            slots = []
+        while len(slots) < ASSIGNMENT_SLOTS:
+            slots.append(str(UNASSIGNED))
+        try:
+            current = int(slots[slot])
+        except ValueError:
+            self.note(f"{self.assignments_path}: player {self.player} slot is not a number; left alone")
+            return
+        if current != UNASSIGNED:
+            self.log(
+                f"{self.assignments_path}: player {self.player} is already assigned to gun "
+                f"{current}; left as it is"
+            )
+            return
+        slots[slot] = str(gun_index)
+        self.lines_assignment = ["Player Assignments", *slots, END_OF_FILE]
+        self.changed = True
+        self.log(f"{self.assignments_path}: assigned player {self.player} to gun {gun_index}")
+        if self.args.dry_run:
+            return
+        try:
+            self.data_dir.mkdir(parents=True, exist_ok=True)
+            with tempfile.NamedTemporaryFile(
+                "w", encoding="utf-8", dir=self.data_dir, delete=False
+            ) as handle:
+                handle.write("\n".join(self.lines_assignment) + "\n")
+                temporary = handle.name
+            os.replace(temporary, self.assignments_path)
+        except OSError as exc:
+            self.note(f"cannot write {self.assignments_path}: {exc}")
+
+    # -- which entries are needed ------------------------------------------
+    def broker_path(self) -> Path | None:
+        if self.args.broker:
+            return Path(self.args.broker)
+        here = Path(__file__).resolve()
+        for candidate in (
+            Path("/userdata/system/hotr/bin/hotr-sinden-broker.py"),
+            here.parent / "hotr-sinden-broker.py",
+            here.parent.parent / "payload/system/hotr-sinden-broker.py",
+        ):
+            if candidate.is_file():
+                return candidate
+        return None
+
+    def attached_players(self) -> dict[str, str]:
+        """Ask the broker which players have a Sinden gun attached right now.
+
+        The broker owns the USB-id rules, so the gun list follows the same
+        decision the broker makes at start-up instead of inventing one.
+        """
+        path = self.broker_path()
+        if path is None:
+            self.note("hotr-sinden-broker.py not found; assuming one gun on player 1")
+            return {}
+        spec = importlib.util.spec_from_file_location("hotr_sinden_broker_autoconfig", path)
+        if spec is None or spec.loader is None:
+            self.note(f"cannot load {path}; assuming one gun on player 1")
+            return {}
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        try:
+            spec.loader.exec_module(module)
+            return dict(module.discover_devices())
+        except Exception as exc:  # noqa: BLE001 - discovery is a convenience only
+            self.note(f"could not ask {path} which guns are attached: {exc}")
+            return {}
+
+    def targets(self) -> list[tuple[int, int, str]]:
+        """(player, port, name) for every gun entry that should exist.
+
+        HOTR serves at most two guns (two TCP servers), so a two-gun box gets
+        one entry per attached gun: player 1 on the base port, player 2 on the
+        next one, each with its own player assignment.
+        """
+        base = int(self.args.port)
+        name = self.args.name or "Sinden"
+        if not self.args.auto:
+            return [(self.player, base, name)]
+        players = self.attached_players()
+        if not players:
+            return [(self.player, base, name)]
+        return [
+            (number, base + number - 1, name if number == 1 else f"{name}{number}")
+            for number in sorted((int(player) for player in players))
+        ]
+
+    # -- entry point -------------------------------------------------------
+    def run(self) -> int:
+        ok = True
+        for player, port, name in self.targets():
+            self.player = player
+            self.port = port
+            self.args.name = name
+            self.changed = False
+            ok = self.write_guns() and ok
+            self.total_changed = self.total_changed or self.changed
+        if self.args.json:
+            print(
+                json.dumps(
+                    {
+                        "guns": str(self.guns_path),
+                        "assignments": str(self.assignments_path),
+                        "changed": self.total_changed,
+                        "actions": self.actions,
+                        "notes": self.notes,
+                        "ok": ok,
+                    },
+                    indent=2,
+                )
+            )
+        elif self.notes and not self.args.quiet:
+            for message in self.notes:
+                print(f"warning: {message}", file=sys.stderr)
+        return 0 if ok else 1
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="hotr-sinden-autoconfig",
+        description="Ensure HOTR has a Sinden gun and a player assignment for it.",
+    )
+    parser.add_argument("--data-dir", default=str(DEFAULT_DATA_DIR))
+    parser.add_argument(
+        "--port", type=int, default=13000, help="TCP port for player 1 (player 2 follows on +1)"
+    )
+    parser.add_argument("--player", type=int, default=1, help="player to assign when not using --auto")
+    parser.add_argument("--name", default=None, help="gun name for player 1 (default Sinden)")
+    parser.add_argument(
+        "--auto",
+        action="store_true",
+        help="ask the broker which players have a gun attached and ensure an entry for each",
+    )
+    parser.add_argument(
+        "--broker", default=None, help="path to hotr-sinden-broker.py (used by --auto)"
+    )
+    parser.add_argument("--recoil-voltage", type=int, default=8, dest="recoil_voltage")
+    parser.add_argument(
+        "--pristine-default",
+        default=None,
+        help="shipped default gun list; a legacy list matching it byte-for-byte may be rewritten",
+    )
+    parser.add_argument("--no-assign", action="store_false", dest="assign_player", default=True)
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--json", action="store_true")
+    parser.add_argument("-q", "--quiet", action="store_true")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    if args.port < 1024 or args.port > 65535:
+        print(f"hotr-sinden-autoconfig: invalid TCP port {args.port}", file=sys.stderr)
+        return 2
+    if args.player < 1 or args.player > ASSIGNMENT_SLOTS:
+        print(f"hotr-sinden-autoconfig: invalid player {args.player}", file=sys.stderr)
+        return 2
+    return Autoconfig(args).run()
+
+
+if __name__ == "__main__":
+    sys.exit(main())

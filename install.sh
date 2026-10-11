@@ -59,6 +59,25 @@ configure_sinden_trigger_recoil(){
   fi
 }
 
+# HOTR only drives light guns that are on its own list (lightguns.hor), so a
+# Sinden box used to need one trip through HOTR's UI before the gun did
+# anything. Everything on the broker side is automatic, so put the entry there
+# instead: one per attached gun, so a two-gun box is configured in one go.
+# Best effort on purpose: a convenience step must never be the reason an
+# install fails.
+configure_sinden_gun(){
+  local tool="$BASE/scripts/hotr-sinden-autoconfig"
+  [ -f "$SINDEN_ENABLE_FILE" ] || return 0
+  [ -x "$tool" ] || return 0
+  if python3 "$tool" --auto --data-dir "$HOTR_DATA/data" \
+       --pristine-default "$BASE/payload/hotr/data/lightguns.hor" >>"$LOG" 2>&1; then
+    msg "Sinden gun(s) are on HOTR's gun list ($HOTR_DATA/data/lightguns.hor)."
+  else
+    warn "Could not add a Sinden gun to HOTR's gun list; run hotr-sinden-autoconfig to retry."
+  fi
+  return 0
+}
+
 # Fail fast with a readable message when the machine cannot run this
 # installer. A missing tool used to surface much later (a failed download or an
 # extraction error). This runs before the upgrade cleanup, so a broken
@@ -346,6 +365,9 @@ chmod +x "$HOTR/bin/hotr-sinden-trigger-recoil"
 # kill switch. They live next to the broker so they can import it directly.
 cp -a "$BASE/scripts/hotr-sinden-check" "$HOTR/bin/hotr-sinden-check"
 cp -a "$BASE/scripts/hotr-sinden-disable" "$HOTR/bin/hotr-sinden-disable"
+# Keeps one Sinden gun (and a player assignment) on HOTR's own gun list, so a
+# Sinden box never has to be configured by hand in the UI.
+cp -a "$BASE/scripts/hotr-sinden-autoconfig" "$HOTR/bin/hotr-sinden-autoconfig"
 # The worker launcher belongs to the retired PTY bridge; ship it only for the
 # explicit opt-in so a default install carries no worker/PTY path at all.
 if [ -f "$SINDEN_PTY_BRIDGE_FILE" ]; then
@@ -388,6 +410,7 @@ fi
 cp -a "$BASE/installer.conf" "$HOTR/install/installer.conf"
 cp -a "$BASE/uninstall.sh" "$BASE/update.sh" "$BASE/check-install.sh" \
   "$BASE/scripts/hotr-debug-report.sh" "$BASE/scripts/hotr-status" \
+  "$BASE/scripts/hotr-sinden-autoconfig" \
   "$BASE/scripts/tests/hotr-sinden-full-selftest.sh" \
   "$BASE/scripts/tests/hotr-sinden-fakegun-selftest.sh" \
   "$BASE/scripts/tests/hotr-sinden-tools-selftest.sh" \
@@ -502,11 +525,12 @@ cp -a "$BASE/scripts/batocera-config-duckstation-hotr" "$BASE/scripts/batocera-c
 cp -a "$BASE/scripts/hotr-status" /usr/bin/hotr-status
 cp -a "$BASE/scripts/hotr-sinden-check" /usr/bin/hotr-sinden-check
 cp -a "$BASE/scripts/hotr-sinden-disable" /usr/bin/hotr-sinden-disable
+cp -a "$BASE/scripts/hotr-sinden-autoconfig" /usr/bin/hotr-sinden-autoconfig
 cp -a "$BASE/payload/system/hotr-sinden-trigger-recoil" /usr/bin/hotr-sinden-trigger-recoil
 cp -a "$BASE/scripts/hotr-gun-assignment" /usr/bin/hotr-gun-assignment
 chmod +x /usr/bin/batocera-config-*-hotr /usr/bin/batocera-config-hotr
 chmod +x /usr/bin/hotr-status /usr/bin/hotr-gun-assignment
-chmod +x /usr/bin/hotr-sinden-check /usr/bin/hotr-sinden-disable /usr/bin/hotr-sinden-trigger-recoil
+chmod +x /usr/bin/hotr-sinden-check /usr/bin/hotr-sinden-disable /usr/bin/hotr-sinden-trigger-recoil /usr/bin/hotr-sinden-autoconfig
 cp -a "$BASE/scripts/desktop/"*.desktop /usr/share/applications/
 
 # The release must include a matching native EmulationStation package. The
@@ -534,6 +558,8 @@ msg "Native EmulationStation HOTR gun-assignment menu installed from /userdata."
 # the MAME light-gun games (area51, timecris, vcop, ...), which overwrite the
 # machine's copies and would otherwise silently drop the option again.
 configure_sinden_trigger_recoil
+# Same reason: the gun list must be right before the daemon and the broker read it.
+configure_sinden_gun
 
 udevadm control --reload-rules 2>/dev/null || true
 udevadm trigger 2>/dev/null || true
