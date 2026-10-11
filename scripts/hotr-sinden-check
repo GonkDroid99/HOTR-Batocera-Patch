@@ -183,19 +183,19 @@ def collect(args: argparse.Namespace, broker: ModuleType) -> dict:
     report["config"]["ports"] = {str(port): sorted(players) for port, players in sorted(ports.items())}
     configured_players = sorted({player for players in ports.values() for player in players})
 
-    devices = {}
     dev_root = args.dev_root or broker.DEV_ROOT
-    for entry in sorted(dev_root.glob("ttyACM*")):
-        device = str(entry)
-        usb = broker.usb_id_of(device)
-        devices[device] = usb
-        report["players"].setdefault(broker.SINDEN_USB_IDS.get(usb or "", ""), device)
+    devices = {str(entry): broker.usb_id_of(str(entry)) for entry in sorted(dev_root.glob("ttyACM*"))}
+    report["devices"] = devices
+    # Resolve with the broker's own rule so the report says what the broker will
+    # actually do, including a factory-default gun that carries no player number.
+    report["players"] = broker.discover_devices(
+        dev_root,
+        players=tuple(configured_players) or ("1", "2"),
+    )
     overrides = read_device_overrides()
     report["overrides"] = overrides
     for player, device in sorted(overrides.items()):
         report["players"][player] = device
-    report["devices"] = devices
-    report["players"] = {player: device for player, device in report["players"].items() if player}
     report["config"]["players"] = configured_players
     expected_players = configured_players or sorted(broker.SINDEN_USB_IDS.values())
     for player in expected_players:
@@ -229,8 +229,11 @@ def collect(args: argparse.Namespace, broker: ModuleType) -> dict:
         else:
             checks.append(check(OK, f"the broker state file is fresh ({age:.0f} s old)"))
 
-    known = {usb for usb in devices.values() if usb in broker.SINDEN_USB_IDS}
-    unknown = sorted({usb for usb in devices.values() if usb and usb not in broker.SINDEN_USB_IDS})
+    sinden = {device: usb for device, usb in devices.items()
+              if usb and usb.split(":", 1)[0] == broker.SINDEN_USB_VENDOR}
+    unnamed = {device: usb for device, usb in sinden.items() if usb not in broker.SINDEN_KNOWN_USB_IDS}
+    foreign = sorted({usb for usb in devices.values()
+                      if usb and usb.split(":", 1)[0] != broker.SINDEN_USB_VENDOR})
     for player, device in sorted(overrides.items()):
         if Path(device).exists():
             checks.append(check(OK, f"player {player}: using the {DEVICES_FILE.name} override {device}"))
@@ -240,11 +243,15 @@ def collect(args: argparse.Namespace, broker: ModuleType) -> dict:
         if overrides:
             checks.append(check(INFO, f"no gun on {dev_root}/ttyACM*; the {DEVICES_FILE.name} override supplies " + ", ".join(f"player {player}={device}" for player, device in sorted(overrides.items()))))
         elif report["broker"]["enabled"]:
-            checks.append(check(FAIL, f"no Sinden gun found on {dev_root}/ttyACM* (USB ids {', '.join(broker.SINDEN_USB_IDS)})"))
+            checks.append(check(FAIL, f"no Sinden gun found on {dev_root}/ttyACM*: no port reports the Sinden USB vendor id {broker.SINDEN_USB_VENDOR}"))
+    elif sinden:
+        checks.append(check(OK, f"found {len(sinden)} Sinden port(s) (USB vendor {broker.SINDEN_USB_VENDOR}): " + ", ".join(f"{device} (USB {usb})" for device, usb in sinden.items())))
     else:
-        checks.append(check(OK, f"found {len(devices)} Sinden port(s): " + ", ".join(f"{device} (USB {usb})" for device, usb in devices.items())))
-    if unknown:
-        checks.append(check(WARN, f"unknown Sinden USB id(s) on {dev_root}: {', '.join(unknown)}"))
+        checks.append(check(INFO, f"{len(devices)} ttyACM port(s) present, but none reports the Sinden USB vendor id {broker.SINDEN_USB_VENDOR}"))
+    if unnamed:
+        checks.append(check(INFO, f"{len(unnamed)} Sinden gun(s) report a product id that names no player ({', '.join(sorted(set(unnamed.values())))}): {', '.join(sorted(unnamed))}. Each is given the first free player, in device order - pin them in {DEVICES_FILE.name} to fix the mapping"))
+    if foreign:
+        checks.append(check(INFO, f"ttyACM port(s) that are not Sinden guns (USB id {', '.join(foreign)}); every Sinden gun reports the vendor id {broker.SINDEN_USB_VENDOR}"))
 
     for player in expected_players:
         device = report["players"].get(player)
@@ -326,7 +333,7 @@ def fire(report: dict, args: argparse.Namespace, broker: ModuleType) -> dict:
             "dropped": entry.get("dropped", 0),
             "refused": entry.get("refused", 0),
             "last_frame": entry.get("last_frame"),
-            "drop_reason": entry.get("drop_reason"),
+            "last_drop": entry.get("last_drop"),
         }
 
     before = counters()
@@ -354,7 +361,7 @@ def fire(report: dict, args: argparse.Namespace, broker: ModuleType) -> dict:
         result["outcome"] = "delivered"
         report["checks"].append(check(OK, f"fired player {player} once: A8 reached {report['players'].get(player) or 'the device'} (last frame {after['last_frame']})"))
     elif after["dropped"] > before["dropped"]:
-        reason = after.get("drop_reason") or "the tracker gate or a missing gun"
+        reason = after.get("last_drop") or "the broker recorded no reason"
         result["outcome"] = "dropped"
         report["checks"].append(check(WARN, f"fired player {player} once: the broker dropped the frame ({reason}); see {BROKER_LOG}"))
     elif after["refused"] > before["refused"]:
@@ -416,8 +423,8 @@ def render(report: dict) -> None:
             )
             if counters.get("last_frame"):
                 print_row("", f"last frame {counters['last_frame']} ({counters.get('last_reason') or '?'})")
-            if counters.get("drop_reason"):
-                print_row("", f"last drop {counters['drop_reason']}")
+            if counters.get("last_drop"):
+                print_row("", f"last drop {counters['last_drop']}")
 
     if report.get("fire"):
         entry = report["fire"]

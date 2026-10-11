@@ -6,10 +6,11 @@
 #   2. hotr-sinden-check --fire sends exactly one A8 frame to the device and
 #      reports it as delivered;
 #   3. --fire refuses a player the listening port does not serve;
-#   4. hotr-sinden-disable stops the broker and removes the enable file;
-#   5. the tools are wired into install.sh, check-install.sh, uninstall.sh and
+#   4. a dropped fire quotes the broker's own last_drop reason;
+#   5. hotr-sinden-disable stops the broker and removes the enable file;
+#   6. the tools are wired into install.sh, check-install.sh, uninstall.sh and
 #      the README;
-#   6. install.sh refuses to start when root, x86_64, a required tool or the
+#   7. install.sh refuses to start when root, x86_64, a required tool or the
 #      free space on /userdata is missing.
 set -euo pipefail
 
@@ -237,6 +238,53 @@ def test_fire_refuses_a_foreign_player():
     if code != 1:
         raise RuntimeError(f"a refused fire must exit 1, got {code}")
     return "player 2 refused before anything was sent"
+
+
+def test_fire_reports_the_brokers_drop_reason():
+    """A dropped fire must quote the broker's own last_drop, not a guess.
+
+    The broker publishes the reason under ``last_drop``; reading any other key
+    silently degrades the verdict to "the tracker gate or a missing gun", which
+    is what made a gun the broker had never recognised look like a timing
+    problem. Player 1 is deliberately given no device here, so the frame takes
+    the no-gun path and the broker records exactly why.
+    """
+    gate_port = PORT + 7
+    gate_config = TMP / "lightguns-gate.hor"
+    gate_state = HOTR_ROOT / "gate-state.json"
+    gate_config.write_text("Light Gun #1\nEND_GENERAL_SETTINGS\n%d\n0\n" % gate_port,
+                           encoding="utf-8")
+    gated = subprocess.Popen([
+        sys.executable, str(BROKER),
+        "--port", f"1={gate_port}",
+        "--device", f"2={gun_port}",
+        "--tracker-gate", "off",
+        "--state-file", str(gate_state),
+        "--log", str(TMP / "gate-broker.log"),
+    ])
+    PROCESSES.append(gated)
+    try:
+        if not wait_for(lambda: gate_state.is_file() and read_json(gate_state).get("players")):
+            raise RuntimeError(f"the gunless broker never published {gate_state}")
+        common_gate = ["--dev-root", str(DEV_ROOT), "--tracker-root", str(TRACKER_ROOT),
+                       "--config", str(gate_config), "--state-file", str(gate_state)]
+        code, data = tool_json([*common_gate, "--fire"])
+        entry = data.get("fire", {})
+        reason = (entry.get("state_after") or {}).get("last_drop")
+        if entry.get("outcome") != "dropped":
+            raise RuntimeError(f"a broker with no gun did not drop the frame: {entry}")
+        if reason != "no Sinden gun is attached":
+            raise RuntimeError(f"the report lost the broker's own drop reason: {reason!r}")
+        if not any(item["level"] == "WARN" and reason in item["message"]
+                   for item in data["checks"]):
+            raise RuntimeError(f"the verdict did not quote the broker's reason: {data['checks']}")
+        if code != 0:
+            raise RuntimeError(f"a dropped fire is a WARN, not a failure, got {code}")
+    finally:
+        if gated.poll() is None:
+            gated.terminate()
+        gated.wait(timeout=5)
+    return "the drop verdict quotes the broker's last_drop"
 
 
 def test_disable_stops_the_broker():
@@ -603,6 +651,8 @@ try:
     report("the device override is reported and validated", test_device_override)
     report("--fire delivers exactly one A8 frame", test_fire_delivers_one_frame)
     report("--fire refuses a player the port does not serve", test_fire_refuses_a_foreign_player)
+    report("a dropped fire quotes the broker's drop reason",
+           test_fire_reports_the_brokers_drop_reason)
     report("hotr-sinden-disable stops the broker", test_disable_stops_the_broker)
     report("hotr-status shows the recoil counters and the no-gun line",
            test_status_renders_sinden_section)

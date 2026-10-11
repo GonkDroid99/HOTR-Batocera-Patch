@@ -192,11 +192,30 @@ the service, or by reinstalling with `HOTR_SINDEN_TCP=1`. The counters behind th
 report are also in `/userdata/system/hotr/sinden-broker-state.json` and in the
 `HOTR Debug Finish` report.
 
-Guns that do not show up as `/dev/ttyACM*` (or a virtual gun used for testing)
-can be assigned by hand: put one `PLAYER=/dev/path` line per gun into
+Guns are found by their USB id. Every Sinden gun reports the vendor id `16c0`, so any
+`/dev/ttyACM*` port under it counts as a gun. `16c0:0f39` is player 1 and `16c0:0f01` is
+player 2 - the ids the Sinden app writes when it assigns a gun to a player. A gun that still
+reports the factory default, `16c0:0f38`, or any other product id under `16c0`, names no
+player at all: it is given the first player still free, in device order, so every gun you
+plug in works.
+
+Any other gun (or a virtual gun used for testing) can be assigned by hand: put
+one `PLAYER=/dev/path` line per gun into
 `/userdata/system/hotr/sinden-devices.conf` and restart the service. Those
 devices are used instead of the USB-id scan, and `hotr-sinden-check` reports
 them. Delete the file to go back to automatic detection.
+
+**Two guns are matched to players by device order, not by USB id.** Two guns left
+at the factory default report the same USB id, so nothing in the scan can tell them
+apart and `player 1`/`player 2` follow the order of `/dev/ttyACM*`. That order can
+change after a replug, so pin both in the override file when the mapping matters.
+Assigning the players in the Sinden app also fixes it: the guns then report
+`16c0:0f39`/`16c0:0f01`, and those ids win over device order.
+
+```sh
+ls /dev/serial/by-id/      # one stable path per gun, preferred over /dev/ttyACM*
+hotr-sinden-check --json   # lists every ttyACM* and the USB id it reports
+```
 
 ### Multiple guns
 
@@ -212,7 +231,10 @@ What that means in practice:
 * Batocera's own layer is not the limit - it already starts one `LightgunMono.exe` per gun, each
   with its own config and its own tty.
 * The broker matches HOTR: it serves players 1 and 2, and `sinden-devices.conf` assigns one device
-  per player. The recoil fix itself is gun-count agnostic (game profiles and `sinden.hor` do not
+  per player. Two guns left at the factory-default USB id `16c0:0f38` both work - each takes the
+  first player still free, in device order - but the ids are identical, so only
+  `sinden-devices.conf` pins which gun is which player.
+  The recoil fix itself is gun-count agnostic (game profiles and `sinden.hor` do not
   mention a player count), so nothing about aiming or recoil breaks with more guns attached - HOTR
   simply has nowhere to send recoil for a third one.
 * Making three or more guns recoil needs an upstream HOTR change (more TCP server slots), not a

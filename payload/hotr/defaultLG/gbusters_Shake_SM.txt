@@ -19,7 +19,7 @@ Recoil_Value 0
 *P1
 #Recoil
 :P2_CtmRecoil
-*P1
+*P2
 #Recoil
 :BallAgitator_Direction
 :BallAgitator_State

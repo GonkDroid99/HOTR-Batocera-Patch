@@ -696,6 +696,70 @@ def test_usb_identity_verification():
         raise RuntimeError(f"the matching gun also warned: {records}")
 
 
+def test_every_sinden_gun_gets_a_player():
+    """Every gun under the Sinden vendor id is assigned, whatever its product id.
+
+    The vendor id is the part of the USB id that never changes, so a gun whose
+    product id names no player - the factory default 16c0:0f38, or one this
+    broker has never seen - is given the first free player in device order rather
+    than being ignored. Device order is not a player number, so an operator who
+    needs a fixed mapping pins the guns in sinden-devices.conf.
+    """
+    broker_module = load_broker_module()
+    root = TMP / "run-default-usb"
+    dev_root = root / "dev"
+    tty_root = root / "sys" / "tty"
+    dev_root.mkdir(parents=True, exist_ok=True)
+
+    def add_gun(name, vendor, product):
+        (dev_root / name).write_text("", encoding="utf-8")
+        node = tty_root / name / "device"
+        node.mkdir(parents=True, exist_ok=True)
+        (node / "idVendor").write_text(f"{vendor}\n", encoding="ascii")
+        (node / "idProduct").write_text(f"{product}\n", encoding="ascii")
+        return str(dev_root / name)
+
+    if "16c0:0f38" in broker_module.SINDEN_USB_IDS:
+        raise RuntimeError("the factory-default id must not name a player in SINDEN_USB_IDS")
+    if "16c0:0f38" not in broker_module.SINDEN_DEFAULT_USB_IDS:
+        raise RuntimeError("the factory-default id is not declared as the default")
+
+    records = []
+    handler = logging.Handler()
+    handler.emit = lambda record: records.append(record.getMessage())
+    logger = logging.getLogger()
+    logger.addHandler(handler)
+    try:
+        first = add_gun("ttyACM0", "16c0", "0f38")
+        if broker_module.discover_devices(dev_root, tty_root) != {"1": first}:
+            raise RuntimeError("a lone factory-default gun was not assigned to player 1")
+        if broker_module.discover_devices(dev_root, tty_root, ("2",)) != {"2": first}:
+            raise RuntimeError("a lone factory-default gun ignored the only configured player")
+        second = add_gun("ttyACM1", "16c0", "0f38")
+        if broker_module.discover_devices(dev_root, tty_root) != {"1": first, "2": second}:
+            raise RuntimeError("two factory-default guns did not both get a player")
+        named = add_gun("ttyACM2", "16c0", "0f39")
+        if broker_module.discover_devices(dev_root, tty_root) != {"1": named, "2": first}:
+            raise RuntimeError("a player-numbered gun did not win its own player")
+        if broker_module.discover_devices(dev_root, tty_root, ("1",)) != {"1": named}:
+            raise RuntimeError("a gun was assigned to a player the broker does not serve")
+        spare = add_gun("ttyACM3", "16c0", "0483")
+        if broker_module.discover_devices(dev_root, tty_root, ("1",)) != {"1": named}:
+            raise RuntimeError("a gun with no player number displaced one that has one")
+        foreign = add_gun("ttyACM4", "0483", "5740")
+        served = broker_module.discover_devices(dev_root, tty_root)
+        if foreign in served.values():
+            raise RuntimeError("a ttyACM port from another vendor was treated as a gun")
+        if served != {"1": named, "2": first}:
+            raise RuntimeError(f"unexpected mapping with four guns attached: {served}")
+    finally:
+        logger.removeHandler(handler)
+    if not any("ttyACM1" in message and "0f38" in message for message in records):
+        raise RuntimeError(f"the device-order assignment was not explained: {records}")
+    if not any(spare in message and "no free player" in message for message in records):
+        raise RuntimeError(f"the surplus gun was not reported: {records}")
+
+
 def test_debug_report_reads_state_file():
     """F12: the debug report renders identity, frames sent and reply bytes."""
     script = Path(DEBUG_REPORT)
@@ -795,6 +859,8 @@ try:
     report("the tracker gate blocks recoil until LightgunMono is up",
            test_tracker_gate_waits_for_lightgunmono)
     report("guns are resolved by USB id and a mismatch warns", test_usb_identity_verification)
+    report("every gun under the Sinden vendor id is assigned a player",
+           test_every_sinden_gun_gets_a_player)
     report("unsafe frames are refused at the write chokepoint",
            test_send_chokepoint_refuses_replying_commands)
     report("the debug report renders the broker state file", test_debug_report_reads_state_file)

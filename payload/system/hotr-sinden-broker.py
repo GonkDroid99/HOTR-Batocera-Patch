@@ -92,6 +92,18 @@ TRACKER_POLL_SECONDS = 1.0
 #: F7: guns are resolved by USB id, never by tty number. The firmware notes
 #: record the same pair for the real hardware.
 SINDEN_USB_IDS = {"16c0:0f39": "1", "16c0:0f01": "2"}
+#: The identity a gun reports until the Sinden app assigns it a player. It names
+#: no player, so it is kept out of SINDEN_USB_IDS: such a gun is given whichever
+#: player is still free (see discover_devices), and sinden-devices.conf pins it
+#: when device order is not what the operator wants.
+SINDEN_DEFAULT_USB_IDS = frozenset({"16c0:0f38"})
+#: The product ids a Sinden gun is known to report by name. A gun reporting any
+#: other product id under SINDEN_USB_VENDOR is still a gun.
+SINDEN_KNOWN_USB_IDS = frozenset(SINDEN_USB_IDS) | SINDEN_DEFAULT_USB_IDS
+#: The USB vendor id every Sinden gun reports, whichever product id it carries:
+#: the part of the USB id that never changes. Any ttyACM port under it counts as
+#: a gun, which is what covers a gun whose product id this broker has never seen.
+SINDEN_USB_VENDOR = "16c0"
 SYSFS_TTY_ROOT = Path("/sys/class/tty")
 DEV_ROOT = Path("/dev")
 
@@ -494,13 +506,51 @@ def usb_id_of(device: str, tty_root: Path = SYSFS_TTY_ROOT) -> str | None:
     return None
 
 
-def discover_devices(dev_root: Path = DEV_ROOT, tty_root: Path = SYSFS_TTY_ROOT) -> dict[str, str]:
-    """Resolve each player's gun by USB id instead of by tty number (F7)."""
-    found: dict[str, str] = {}
+def gun_candidates(dev_root: Path = DEV_ROOT, tty_root: Path = SYSFS_TTY_ROOT) -> list[tuple[str, str]]:
+    """Return ``(device, usb_id)`` for every ttyACM port a Sinden gun could own.
+
+    This is every port under the Sinden vendor id, not only the product ids named
+    in SINDEN_USB_IDS: an unfamiliar product id is still a gun, and
+    discover_devices logs the id it actually saw while assigning it.
+    """
+    candidates: list[tuple[str, str]] = []
     for device in sorted(dev_root.glob("ttyACM*")):
         usb = usb_id_of(str(device), tty_root)
-        player = SINDEN_USB_IDS.get(usb) if usb else None
+        if usb and usb.split(":", 1)[0] == SINDEN_USB_VENDOR:
+            candidates.append((str(device), usb))
+    return candidates
+
+
+def discover_devices(
+    dev_root: Path = DEV_ROOT,
+    tty_root: Path = SYSFS_TTY_ROOT,
+    players: tuple[str, ...] | list[str] = ("1", "2"),
+) -> dict[str, str]:
+    """Resolve each player's gun by USB id instead of by tty number (F7).
+
+    Every Sinden gun shares the vendor id in SINDEN_USB_VENDOR, so every ttyACM
+    port under it counts as a gun. An id that names a player (SINDEN_USB_IDS) is
+    assigned to that player; every other gun - one still on the factory-default
+    id, or one reporting a product id this broker has never seen - carries no
+    player number at all, so it is given the first player still free, in device
+    order, and every gun that is plugged in therefore works. Device order is not
+    a player number: pin the guns in sinden-devices.conf to freeze the mapping.
+    """
+    found: dict[str, str] = {}
+    spare: list[tuple[str, str]] = []
+    for device, usb in gun_candidates(dev_root, tty_root):
+        player = SINDEN_USB_IDS.get(usb)
         if player is None:
+            spare.append((device, usb))
+            continue
+        if player not in players:
+            logging.warning(
+                "ignoring %s: its USB id %s is player %s, and this broker serves %s",
+                device,
+                usb,
+                player,
+                ", ".join(players),
+            )
             continue
         if player in found:
             logging.warning(
@@ -511,7 +561,27 @@ def discover_devices(dev_root: Path = DEV_ROOT, tty_root: Path = SYSFS_TTY_ROOT)
                 device,
             )
             continue
-        found[player] = str(device)
+        found[player] = device
+    free = [player for player in players if player not in found]
+    for (device, usb), player in zip(spare, free, strict=False):
+        logging.info(
+            "assigning %s (USB id %s, %s) to player %s; pin the guns in sinden-devices.conf "
+            "if that is not the order you want",
+            device,
+            usb,
+            "the factory-default Sinden id" if usb in SINDEN_DEFAULT_USB_IDS
+            else "a Sinden product id that names no player",
+            player,
+        )
+        found[player] = device
+    for device, usb in spare[len(free):]:
+        logging.warning(
+            "%s (USB id %s) has no free player left: this broker serves players %s, so the "
+            "gun is ignored",
+            device,
+            usb,
+            ", ".join(players),
+        )
     return found
 
 
@@ -521,8 +591,23 @@ def verify_device(device: str, player: str, tty_root: Path = SYSFS_TTY_ROOT) -> 
     if usb is None:
         return None
     actual = SINDEN_USB_IDS.get(usb)
-    if actual is None:
-        logging.warning("player %s: %s reports unknown Sinden USB id %s", player, device, usb)
+    if usb.split(":", 1)[0] != SINDEN_USB_VENDOR:
+        logging.warning(
+            "player %s: %s reports USB id %s, which is not a Sinden gun (every Sinden gun "
+            "reports %s:*)",
+            player,
+            device,
+            usb,
+            SINDEN_USB_VENDOR,
+        )
+    elif actual is None:
+        logging.info(
+            "player %s: %s reports USB id %s, which names no player; that mapping comes "
+            "from sinden-devices.conf or from device order",
+            player,
+            device,
+            usb,
+        )
     elif actual != player:
         logging.warning(
             "gun on port %s is not player %s: its USB id %s is player %s",
@@ -969,9 +1054,13 @@ def main() -> int:
     devices = parse_devices(args.device)
     players = sorted(set().union(*ports.values()))
     if not devices and not args.simulate:
-        devices = discover_devices()
+        devices = discover_devices(players=tuple(players) or ("1", "2"))
         if not devices:
-            logging.warning("no Sinden gun found: checked %s for USB ids %s", DEV_ROOT / "ttyACM*", ", ".join(SINDEN_USB_IDS))
+            logging.warning(
+                "no Sinden gun found: checked %s for USB ids %s",
+                DEV_ROOT / "ttyACM*",
+                ", ".join(sorted(SINDEN_KNOWN_USB_IDS)),
+            )
     channels: dict[str, GunChannel] = {}
     for player in players:
         device = None if args.simulate else devices.get(player)

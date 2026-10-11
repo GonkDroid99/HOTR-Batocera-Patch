@@ -60,7 +60,11 @@ Recoil_Value 0
 *P2
 >Shake
 :P1_GunRecoil
+*P1
+#Recoil
 :P2_GunRecoil
+*P2
+#Recoil
 :P1_Life
 *P1
 >Display_Life
