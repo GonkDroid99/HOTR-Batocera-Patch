@@ -527,6 +527,48 @@ def test_own_gun_blocks_the_firmware_rearm():
         process.terminate()
 
 
+def test_next_game_on_the_same_connection():
+    """HOTR keeps one connection across games (sinden.hor has no Close_COM), so the
+    next game's Open_COM burst (N8) must start the takeover over, or the last game's
+    F18b guard swallows every ammo-mode kick of the next one."""
+    process, slave, report = start_gun(name="nextgame")
+    port, log, stop = start_direct_broker(slave, "nextgame", 45995)
+
+    def state():
+        return read_json(TMP / "run-nextgame" / "state.json")["players"]["1"]
+
+    def frames():
+        return read_json(report).get("frame_log", [])
+
+    try:
+        client = socket.create_connection(("127.0.0.1", port), 2)
+        if not wait_for(lambda: state()["gun_owned"], 5):
+            raise RuntimeError(f"the session never took the gun over: {state()}")
+        client.sendall(b"1N8\n1N8\n")
+        if not wait_for(lambda: frames().count("aa a2 50 00 50 0d bb") == 2, 5):
+            raise RuntimeError(f"the first game's Open_COM burst never arrived: {frames()}")
+        if frames().count("aa a1 01 00 00 00 bb") != 1:
+            raise RuntimeError(f"the first game's own Open_COM retook the gun: {frames()}")
+        # Game 1 fires HOTR's own shots, then exits without closing the connection.
+        client.sendall(b"1A\n")
+        if not wait_for(lambda: state()["kick_mode"] == "hotr", 5):
+            raise RuntimeError(f"game 1's shot did not hand the kick to HOTR: {state()}")
+        # Game 2 starts on the same connection and is an ammo game.
+        client.sendall(b"1N8\n")
+        if not wait_for(lambda: frames().count("aa a1 01 00 00 00 bb") == 2, 5):
+            raise RuntimeError(f"the next game did not take the gun over again: {frames()}")
+        if not wait_for(lambda: state()["kick_mode"] == "unknown", 5):
+            raise RuntimeError(f"game 1's kick mode leaked into game 2: {state()}")
+        client.sendall(b"1K1\n")
+        if not wait_for(lambda: "aa a4 01 00 00 00 bb" in frames(), 5):
+            raise RuntimeError(f"game 2's ammo kick was swallowed: {state()} {frames()}")
+        if "new game on the same HOTR connection" not in read_log(log):
+            raise RuntimeError(f"the restart was not logged: {read_log(log)}")
+    finally:
+        stop()
+        process.terminate()
+
+
 def test_gunless_session_warns_on_connect():
     """A game that connects with no gun attached must say so out loud."""
     run_dir = TMP / "run-gunless"
@@ -937,6 +979,8 @@ try:
     report("a game session takes the gun over and hands it back", test_own_gun_takes_the_session_over)
     report("HOTR's own kicks are never doubled by the firmware",
            test_own_gun_blocks_the_firmware_rearm)
+    report("the next game on a kept HOTR connection takes the gun over again",
+           test_next_game_on_the_same_connection)
     report("a game session without a gun says so at connect time",
            test_gunless_session_warns_on_connect)
     report("the direct backend leaves the port and the gun's bytes alone",

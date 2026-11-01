@@ -27,7 +27,6 @@ payload, and the local Buildroot emulator toolchain.
 | `scripts/hotr-configgen-launch` | Emulator launcher and temporary PCSX2 fullscreen workaround. |
 | `scripts/patch-batocera-sinden.sh` | Optional Sinden patch: `apply` or `remove`; creates a backup. |
 | `scripts/ports/HookOfTheReaper.sh` | Opens the HOTR configuration UI. |
-
 ## Testing
 
 All repository tests live under `scripts/tests/`. `install.sh` copies the

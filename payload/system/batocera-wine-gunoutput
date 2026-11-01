@@ -1,0 +1,619 @@
+#!/bin/bash
+# batocera-wine-gunoutput - per-game gun-output producer launcher.
+#
+# Part of the HOTR "gun output" component (see PLAN-gunoutput-shim.md in the Demulshooter
+# port folder). It starts the per-game output producer - DemulShooter running in MAME
+# network-output mode - for a TeknoParrot-family title, driven by a data table instead of
+# per-image edits, and stops it again when the game session ends.
+#
+#   batocera-wine-gunoutput start  <system> <rom> <winepoint> <winebin> [arch]
+#   batocera-wine-gunoutput stop   <system> <rom>
+#   batocera-wine-gunoutput env    <system> <rom>     # KEY=VALUE lines for the *game* environment
+#   batocera-wine-gunoutput lookup <system> <rom>     # the matched table row (diagnostics)
+#   batocera-wine-gunoutput status                    # live producers
+#   batocera-wine-gunoutput native-start <system> <rom>   # producer for a native emulator (no wine)
+#   batocera-wine-gunoutput native-stop  <system> <rom>
+#
+# Invariants
+#   * never fails the caller: every code path exits 0, problems are logged instead
+#   * never writes inside a game image (the image is read-only anyway) - only the writable
+#     overlay ($WINEPOINT) is touched
+#   * at most one producer per game: start is idempotent
+#   * complete no-op unless the table row says kind=ds-net / ds_inside=no, or kind=flycast
+#     (native-start/native-stop, driven by the configgen Generator.running() patch)
+#
+# Table: <system> <TAB> <rom_regex> <TAB> kind <TAB> target <TAB> rom_id <TAB> announce
+#        <TAB> ds_inside <TAB> arch <TAB> env
+#   kind      ds-net   = start DemulShooter as the producer (this script's job)
+#             ds-plugin= the Unity/BepInEx route, handled by batocera-wine-guns + the game plugin
+#             flycast  = start the native Flycast state reader (native-start/native-stop): it reads
+#                        the emulator's RAM and publishes DemulShooter-shaped names on port 8000
+#             none     = nothing emits outputs for this title yet
+#   target    DemulShooter -target= value   (e.g. rawthrill, ttx, ringwide, seganu)
+#   rom_id    DemulShooter -rom= value      (e.g. ts, eadp, lma) - also the name HOTR sees
+#   announce  what HOTR will receive in mame_start (defaults to rom_id; DemulShooter derives it
+#             from -rom= so this column is documentation + a profile self-check)
+#   ds_inside yes = the image already starts DemulShooter itself, so do not start a second one
+#   arch      32 or 64 - the bitness of the *game*, which must match DemulShooter's build
+#             (DemulShooter.exe / DemulShooterX64.exe). Defaults to 64.
+#   env       optional extra KEY=VALUE pairs for the game environment, space separated
+#
+# Shipped rows live in /usr/share/batocera/hotr/gun-output.tsv; a user file at
+# /userdata/system/hotr/gun-output.local.tsv is read afterwards and wins.
+
+set -u
+
+PATH=/usr/bin:/bin:/usr/sbin:/sbin
+export PATH
+
+# Development/testing hook: point every path at a staging root (unset in production).
+ROOT="${GUNOUTPUT_ROOT:-}"
+
+TABLE_SHIPPED="${ROOT}/usr/share/batocera/hotr/gun-output.tsv"
+TABLE_LOCAL="${ROOT}/userdata/system/hotr/gun-output.local.tsv"
+HOTR_PROFILE_DIR="${ROOT}/userdata/system/hook-of-the-reaper/defaultLG"
+DS_CACHE="${ROOT}/userdata/system/hotr/demulshooter"
+STATE_FILE="${ROOT}/var/run/hotr-gunoutput.state"
+LOG_DIR="${ROOT}/userdata/system/logs"
+LOG_FILE="${LOG_DIR}/hotr-gunoutput.log"
+ICD_DIR="${ROOT}/userdata/system/.local/share/vulkan/icd.d"
+READER="${ROOT}/userdata/system/hotr/tools/flycast-outputs.py"
+
+ROW_MATCHED=""
+ROW_KIND=""
+ROW_TARGET=""
+ROW_ROMID=""
+ROW_ANNOUNCE=""
+ROW_DSINSIDE=""
+ROW_ARCH=""
+ROW_ENV=""
+
+log() {
+    local msg
+    msg="$(date '+%Y-%m-%d %H:%M:%S') [gunoutput] $*"
+    mkdir -p "$LOG_DIR" 2>/dev/null
+    printf '%s\n' "$msg" >>"$LOG_FILE" 2>/dev/null
+    if [ -t 2 ]; then
+        printf '%s\n' "$msg" >&2
+    fi
+    return 0
+}
+
+usage() {
+    sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'
+    return 0
+}
+
+sanitize() {
+    printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '_' | cut -c1-60
+}
+
+# ---------------------------------------------------------------- table lookup
+
+lookup_row() {
+    local sys="$1" rom="$2" file line c1 c2 c3 c4 c5 c6 c7 c8 c9 rest
+    local sys_lc rom_ok
+    ROW_MATCHED=""; ROW_KIND=""; ROW_TARGET=""; ROW_ROMID=""
+    ROW_ANNOUNCE=""; ROW_DSINSIDE=""; ROW_ARCH=""; ROW_ENV=""
+
+    sys_lc="$(printf '%s' "$sys" | tr 'A-Z' 'a-z')"
+
+    for file in "$TABLE_SHIPPED" "$TABLE_LOCAL"; do
+        [ -r "$file" ] || continue
+        while IFS= read -r line || [ -n "$line" ]; do
+            case "$line" in
+                ''|'#'*) continue ;;
+            esac
+            # NB: `IFS=$'\t' read` collapses runs of tabs (tab is IFS whitespace), which would
+            # shift the columns of rows that leave a field empty. Translate tabs to '|' first -
+            # '|' is not IFS whitespace, so empty fields survive.
+            IFS='|' read -r c1 c2 c3 c4 c5 c6 c7 c8 c9 rest <<<"${line//$'\t'/|}"
+            [ -n "${c1:-}" ] || continue
+            [ -n "${c2:-}" ] || continue
+            [ -n "${c3:-}" ] || continue
+            [ "$(printf '%s' "$c1" | tr 'A-Z' 'a-z')" = "$sys_lc" ] || continue
+            rom_ok=1
+            printf '%s' "$rom" | grep -Eiq -- "$c2" || rom_ok=0
+            [ "$rom_ok" = "1" ] || continue
+            case "$c3" in
+                ds-net|ds-plugin|flycast|none) ;;
+                *) log "table: ignoring row with unknown kind '$c3' (rom regex '$c2')"; continue ;;
+            esac
+            ROW_MATCHED="$line"
+            ROW_KIND="$c3"
+            ROW_TARGET="${c4:-}"
+            ROW_ROMID="${c5:-}"
+            ROW_ANNOUNCE="${c6:-}"
+            ROW_DSINSIDE="${c7:-}"
+            ROW_ARCH="${c8:-}"
+            ROW_ENV="${c9:-}"
+        done <"$file"
+    done
+
+    [ -n "$ROW_MATCHED" ]
+}
+
+# ------------------------------------------------------------ environment glue
+
+# Which HOTR profile will answer for this title: the per-title one if it exists, otherwise the
+# generic default.txt (which HOTR falls back to for any unknown game name).
+profile_for() {
+    local name="$1"
+    if [ -n "$name" ] && [ -f "${HOTR_PROFILE_DIR}/${name}.txt" ]; then
+        printf '%s' "${HOTR_PROFILE_DIR}/${name}.txt"
+    elif [ -f "${HOTR_PROFILE_DIR}/default.txt" ]; then
+        printf '%s' "${HOTR_PROFILE_DIR}/default.txt (fallback)"
+    else
+        printf '%s' "(none)"
+    fi
+    return 0
+}
+
+# The *game* environment. Printed as shell assignments for the patcher's hook to eval, because a
+# child process cannot export into its parent - this is how TP_REMOTETHREAD reaches the game
+# loader without editing every image's autorun.cmd.
+cmd_env() {
+    local sys="$1" rom="$2" icd_list="" f pair announce
+
+    if ! lookup_row "$sys" "$rom"; then
+        return 0
+    fi
+    if [ "$ROW_KIND" != "ds-net" ]; then
+        return 0
+    fi
+
+    # OpenParrot needs RemoteThread injection to start a game under Wine; without this every
+    # OpenParrot launch dies with "Failed to run the process".
+    printf 'export TP_REMOTETHREAD=1\n'
+
+    # VM-only software/venus Vulkan ICDs: only when the files really exist, so a real machine
+    # keeps its own driver selection untouched.
+    for f in "${ICD_DIR}/venus_icd.x86_64.json" "${ICD_DIR}/lvp_icd.x86_64.json"; do
+        [ -f "$f" ] && icd_list="${icd_list:+${icd_list}:}${f}"
+    done
+    if [ -n "$icd_list" ]; then
+        printf 'export VK_ICD_FILENAMES="%s"\n' "$icd_list"
+    fi
+
+    # optional per-row extras, validated to KEY=VALUE only
+    if [ -n "$ROW_ENV" ]; then
+        for pair in $ROW_ENV; do
+            case "$pair" in
+                [A-Za-z_]*=*) printf 'export %s\n' "$pair" ;;
+                *) log "table: ignoring invalid env entry '$pair'" ;;
+            esac
+        done
+    fi
+
+    announce="${ROW_ANNOUNCE:-$ROW_ROMID}"
+    log "env: ${sys}/${rom} -> target=${ROW_TARGET} rom=${ROW_ROMID} announce=${announce} profile=$(profile_for "$announce")"
+    return 0
+}
+
+# ------------------------------------------------------------------- producer
+
+# DemulShooter is a .NET application that must run inside the same prefix as the game. Images
+# that already carry it use their own copy; for the others we drop in the copy fetched by the
+# installer (with a config.ini that already has network output enabled).
+ensure_producer_files() {
+    local winepoint="$1" arch="$2" exe_name dir_name src dst
+
+    if [ "$arch" = "32" ]; then
+        exe_name="DemulShooter.exe"
+        dir_name="DemulShooter"
+    else
+        exe_name="DemulShooterX64.exe"
+        dir_name="DemulShooterX64"
+    fi
+
+    dst="${winepoint}/drive_c/DemulShooter"
+    if [ -f "${dst}/${exe_name}" ]; then
+        printf '%s' "${dst}/${exe_name}"
+        return 0
+    fi
+    if [ -f "${dst}/DemulShooter.exe" ] || [ -f "${dst}/DemulShooterX64.exe" ]; then
+        # the image brought its own copy (maybe the other architecture)
+        if [ -f "${dst}/${exe_name}" ]; then
+            printf '%s' "${dst}/${exe_name}"
+        else
+            printf '%s' "${dst}/DemulShooterX64.exe"
+        fi
+        return 0
+    fi
+
+    # The official release archive is flat (DemulShooter.exe, DemulShooterX64.exe and DsCore.dll
+    # in one directory); a per-architecture layout is also accepted.
+    src=""
+    if [ -f "${DS_CACHE}/${exe_name}" ]; then
+        src="${DS_CACHE}"
+    elif [ -f "${DS_CACHE}/${dir_name}/${exe_name}" ]; then
+        src="${DS_CACHE}/${dir_name}"
+    elif [ "$arch" = "32" ] && [ -f "${DS_CACHE}/DemulShooterX64.exe" ]; then
+        # fall back to the other architecture rather than refusing to start
+        src="${DS_CACHE}"
+        exe_name="DemulShooterX64.exe"
+    elif [ "$arch" != "32" ] && [ -f "${DS_CACHE}/DemulShooter.exe" ]; then
+        src="${DS_CACHE}"
+        exe_name="DemulShooter.exe"
+    elif [ -f "${DS_CACHE}/DemulShooterX64/DemulShooterX64.exe" ]; then
+        src="${DS_CACHE}/DemulShooterX64"
+        exe_name="DemulShooterX64.exe"
+    elif [ -f "${DS_CACHE}/DemulShooter/DemulShooter.exe" ]; then
+        src="${DS_CACHE}/DemulShooter"
+        exe_name="DemulShooter.exe"
+    fi
+    if [ -z "$src" ]; then
+        log "producer: no DemulShooter binary in ${DS_CACHE} (run the installer)"
+        return 1
+    fi
+
+    mkdir -p "$dst" 2>/dev/null
+    cp -a "${src}/." "$dst/" 2>/dev/null
+    if [ -f "${dst}/${exe_name}" ]; then
+        log "producer: copied ${src} -> ${dst}"
+        printf '%s' "${dst}/${exe_name}"
+        return 0
+    fi
+    log "producer: copy failed ${src} -> ${dst}"
+    return 1
+}
+
+# DemulShooter's config parser is flat (every "key = value" line, no sections) - see
+# DsCore/Config/Configurator.cs ReadDsConfig(). Network output is what HOTR consumes; the
+# window-messages route must be off or it shadows the network one.
+ensure_producer_config() {
+    local winepoint="$1" cfg orig key
+    cfg="${winepoint}/drive_c/DemulShooter/config.ini"
+
+    if [ ! -f "$cfg" ]; then
+        log "producer: no config.ini at ${cfg} (DemulShooter will write its defaults)"
+        return 0
+    fi
+    orig="${cfg}.orig"
+    if [ ! -f "$orig" ]; then
+        cp -a "$cfg" "$orig" 2>/dev/null && log "producer: kept original config as ${orig}"
+    fi
+    for key in "OutputEnabled = True" "WM_OutputsEnabled = False" "Net_OutputsEnabled = True"; do
+        set_ini_key "$cfg" "${key%% = *}" "${key##* = }"
+    done
+    return 0
+}
+
+set_ini_key() {
+    local file="$1" key="$2" value="$3"
+    if grep -qE "^[[:space:]]*${key}[[:space:]]*=" "$file" 2>/dev/null; then
+        sed -i -E "s|^[[:space:]]*${key}[[:space:]]*=.*|${key} = ${value}|" "$file" 2>/dev/null
+    else
+        printf '%s = %s\n' "$key" "$value" >>"$file" 2>/dev/null
+        log "producer: appended missing key ${key} = ${value} to $(basename "$file")"
+    fi
+    return 0
+}
+
+# batocera-wine symlinks DXVK into both system32 and syswow64. In a VM without a 32-bit Vulkan
+# ICD every 32-bit process that loads DXVK aborts with DxvkError (the TeknoParrot UI, 32-bit
+# games). Removing the 32-bit links leaves the 64-bit ones in place, so 64-bit games keep DXVK
+# while 32-bit code falls back to Wine's own wined3d.
+split_dxvk_arch() {
+    local winepoint="$1" d target removed=0
+    for d in d3d8 d3d9 d3d10core d3d11 d3d12 d3d12core dxgi; do
+        target="${winepoint}/drive_c/windows/syswow64/${d}.dll"
+        if [ -L "$target" ]; then
+            rm -f "$target" 2>/dev/null && removed=$((removed + 1))
+        fi
+    done
+    if [ "$removed" -gt 0 ]; then
+        log "producer: removed ${removed} 32-bit DXVK link(s) so 32-bit processes use wined3d"
+    fi
+    return 0
+}
+
+state_alive_pid() {
+    local sys="$1" rom="$2" line pid
+    [ -r "$STATE_FILE" ] || return 1
+    while IFS= read -r line || [ -n "$line" ]; do
+        case "$line" in
+            "${sys}|${rom}|"*) ;;
+            *) continue ;;
+        esac
+        pid="${line##*|}"
+        if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+            printf '%s' "$pid"
+            return 0
+        fi
+    done <"$STATE_FILE"
+    return 1
+}
+
+state_all_pids() {
+    local line pid
+    [ -r "$STATE_FILE" ] || return 0
+    while IFS= read -r line || [ -n "$line" ]; do
+        [ -n "$line" ] || continue
+        pid="${line##*|}"
+        if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+            printf '%s\n' "$pid"
+        fi
+    done <"$STATE_FILE"
+    return 0
+}
+
+state_add() {
+    local sys="$1" rom="$2" pid="$3"
+    state_remove "$sys" "$rom"
+    printf '%s|%s|%s\n' "$sys" "$rom" "$pid" >>"$STATE_FILE" 2>/dev/null
+    return 0
+}
+
+state_prune() {
+    local line pid tmp
+    [ -r "$STATE_FILE" ] || return 0
+    tmp="$(mktemp)" 2>/dev/null || return 0
+    while IFS= read -r line || [ -n "$line" ]; do
+        [ -n "$line" ] || continue
+        pid="${line##*|}"
+        if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+            printf '%s\n' "$line"
+        fi
+    done <"$STATE_FILE" >"$tmp" 2>/dev/null
+    mv "$tmp" "$STATE_FILE" 2>/dev/null
+    return 0
+}
+
+state_remove() {
+    local sys="$1" rom="$2" line tmp
+    [ -r "$STATE_FILE" ] || return 0
+    tmp="$(mktemp)" 2>/dev/null || return 0
+    while IFS= read -r line || [ -n "$line" ]; do
+        case "$line" in
+            "${sys}|${rom}|"*) continue ;;
+        esac
+        printf '%s\n' "$line"
+    done <"$STATE_FILE" >"$tmp" 2>/dev/null
+    mv "$tmp" "$STATE_FILE" 2>/dev/null
+    return 0
+}
+
+cmd_start() {
+    local sys="${1:-}" rom="${2:-}" winepoint="${3:-}" winebin="${4:-}" arch="${5:-}"
+    local exe pid log_out announce other
+
+    [ -n "$sys" ] && [ -n "$rom" ] && [ -n "$winepoint" ] && [ -n "$winebin" ] || return 0
+    [ -d "${winepoint}/drive_c" ] || { log "start: ${sys}/${rom} no prefix at ${winepoint}"; return 0; }
+    [ -x "$winebin" ] || { log "start: ${sys}/${rom} wine binary not executable: ${winebin}"; return 0; }
+
+    if ! lookup_row "$sys" "$rom"; then
+        log "start: ${sys}/${rom} has no table row - nothing to do"
+        return 0
+    fi
+    case "$ROW_KIND" in
+        ds-net) ;;
+        ds-plugin)
+            log "start: ${sys}/${rom} kind=ds-plugin (in-game BepInEx plugin) - nothing to start"
+            return 0 ;;
+        *)
+            log "start: ${sys}/${rom} kind=none - no producer exists for this title"
+            return 0 ;;
+    esac
+    if [ "$(printf '%s' "$ROW_DSINSIDE" | tr 'A-Z' 'a-z')" = "yes" ]; then
+        log "start: ${sys}/${rom} ds_inside=yes - the image starts DemulShooter itself"
+        # ...but the copy inside the image ships with the network output switched off, so its values
+        # would never reach HOTR. Flip the mounted prefix's config before the game starts (the
+        # original is kept as config.ini.orig) and do not start a second producer.
+        ensure_producer_config "$winepoint"
+        log "start: ${sys}/${rom} image DemulShooter config set to network output"
+        return 0
+    fi
+    if [ -z "$ROW_TARGET" ] || [ -z "$ROW_ROMID" ]; then
+        log "start: ${sys}/${rom} row has no target/rom_id - skipping"
+        return 0
+    fi
+
+    pid="$(state_alive_pid "$sys" "$rom")" && {
+        log "start: ${sys}/${rom} already running as pid ${pid}"
+        return 0
+    }
+
+    # DemulShooter's network output owns port 8000, so only one producer can run at a time.
+    # Clean up producers this script started for another game (never touch foreign processes).
+    for other in $(state_all_pids); do
+        log "start: ${sys}/${rom} stopping leftover producer pid ${other}"
+        kill "$other" 2>/dev/null
+    done
+    sleep 0.3
+    state_prune
+    # A crashed session - or an image whose ds_inside row is wrong - can leave a DemulShooter
+    # behind, and DemulShooter refuses to start twice ("another instance of DemulShooter is
+    # running"). Clear strays, then give the image a moment to start its own one.
+    for other in $(pgrep -f '[D]emulShooter' 2>/dev/null); do
+        log "start: ${sys}/${rom} stopping stray DemulShooter pid ${other}"
+        kill "$other" 2>/dev/null
+    done
+    sleep 2
+    if pgrep -f '[D]emulShooter' >/dev/null 2>&1 || ss -ltn 2>/dev/null | grep -q ':8000 '; then
+        log "start: ${sys}/${rom} a DemulShooter is already running (the image started it) - not starting a second one"
+        return 0
+    fi
+
+    [ -n "$arch" ] || arch="${ROW_ARCH:-64}"
+    case "$arch" in
+        32|64) ;;
+        *) log "start: ${sys}/${rom} unknown arch '$arch' - using 64"; arch=64 ;;
+    esac
+
+    announce="${ROW_ANNOUNCE:-$ROW_ROMID}"
+    exe="$(ensure_producer_files "$winepoint" "$arch")" || return 0
+    ensure_producer_config "$winepoint"
+    split_dxvk_arch "$winepoint"
+
+    log_out="${LOG_DIR}/hotr-gunoutput-$(sanitize "$rom").log"
+    : >"$log_out" 2>/dev/null
+    printf '%s\n' "--- $(date '+%Y-%m-%d %H:%M:%S') DemulShooter -target=${ROW_TARGET} -rom=${ROW_ROMID} (announce=${announce}, profile=$(profile_for "$announce"))" >>"$log_out" 2>/dev/null
+
+    # The producer is a Windows binary: it needs the same prefix as the game, a display and HOME.
+    setsid nohup env \
+        WINEPREFIX="$winepoint" \
+        HOME="${HOME:-/userdata/system}" \
+        DISPLAY="${DISPLAY:-:0}" \
+        WINEDEBUG=-all \
+        "$winebin" "$exe" "-target=${ROW_TARGET}" "-rom=${ROW_ROMID}" \
+        >>"$log_out" 2>&1 </dev/null &
+
+    pid=$!
+    sleep 1
+    if kill -0 "$pid" 2>/dev/null; then
+        state_add "$sys" "$rom" "$pid"
+        log "start: ${sys}/${rom} -> pid ${pid} (target=${ROW_TARGET} rom=${ROW_ROMID}, log ${log_out})"
+    else
+        log "start: ${sys}/${rom} producer exited immediately (see ${log_out})"
+        if grep -qi 'another instance' "$log_out" 2>/dev/null; then
+            log "start: ${sys}/${rom} hint: the image started its own DemulShooter - this row should say ds_inside=yes"
+        fi
+    fi
+    return 0
+}
+
+cmd_stop() {
+    local sys="${1:-}" rom="${2:-}" pid i
+    [ -n "$sys" ] && [ -n "$rom" ] || return 0
+
+    pid="$(state_alive_pid "$sys" "$rom")" || {
+        state_remove "$sys" "$rom"
+        return 0
+    }
+    log "stop: ${sys}/${rom} killing producer pid ${pid}"
+    kill "$pid" 2>/dev/null
+    i=0
+    while [ "$i" -lt 20 ] && kill -0 "$pid" 2>/dev/null; do
+        sleep 0.25
+        i=$((i + 1))
+    done
+    if kill -0 "$pid" 2>/dev/null; then
+        kill -9 "$pid" 2>/dev/null
+        log "stop: ${sys}/${rom} producer pid ${pid} needed SIGKILL"
+    fi
+    state_remove "$sys" "$rom"
+    return 0
+}
+
+# ----------------------------------------------- native (non-wine) producers
+
+# Native emulators (Flycast as a libretro core, or the standalone binary) never run through
+# batocera-wine, so the launcher patch cannot start a producer for them. configgen calls
+# Generator.running() around every emulator launch, and the patched version calls in here. Only
+# rows with kind=flycast do anything, so the hook is a no-op for every other emulator.
+cmd_native_start() {
+    local sys="${1:-}" rom="${2:-}" pid other romid log_out
+    [ -n "$sys" ] && [ -n "$rom" ] || return 0
+
+    lookup_row "$sys" "$rom" || return 0
+    [ "$ROW_KIND" = "flycast" ] || return 0
+    if [ ! -r "$READER" ]; then
+        log "native-start: ${sys}/${rom} reader not installed (${READER})"
+        return 0
+    fi
+
+    pid="$(state_alive_pid "$sys" "$rom")" && {
+        log "native-start: ${sys}/${rom} already running as pid ${pid}"
+        return 0
+    }
+
+    # The reader owns port 8000, so only one producer can run: clear ours from an earlier session
+    # and any stray reader, exactly like the DemulShooter path does.
+    for other in $(state_all_pids); do
+        log "native-start: ${sys}/${rom} stopping leftover producer pid ${other}"
+        kill "$other" 2>/dev/null
+    done
+    for other in $(pgrep -f '^python3 .*[f]lycast-outputs\.py' 2>/dev/null); do
+        log "native-start: ${sys}/${rom} stopping stray flycast reader pid ${other}"
+        kill "$other" 2>/dev/null
+    done
+    sleep 0.3
+    state_prune
+
+    romid="${ROW_ROMID:-$ROW_ANNOUNCE}"
+    [ -n "$romid" ] || romid="${rom%%.*}"
+    log_out="${LOG_DIR}/hotr-gunoutput-$(sanitize "$rom").log"
+
+    # The reader waits for its emulator to appear, so starting it first is safe - and required,
+    # because it must hold port 8000 before Flycast's own network output tries to bind it.
+    setsid nohup python3 "$READER" --rom "$romid" --log "$log_out" >>/dev/null 2>&1 </dev/null &
+    pid=$!
+    sleep 1
+    if kill -0 "$pid" 2>/dev/null; then
+        state_add "$sys" "$rom" "$pid"
+        log "native-start: ${sys}/${rom} -> pid ${pid} (flycast reader, rom=${romid}, log ${log_out})"
+    else
+        log "native-start: ${sys}/${rom} reader exited immediately (see ${log_out})"
+    fi
+    return 0
+}
+
+cmd_native_stop() {
+    local sys="${1:-}" rom="${2:-}" pid i
+    [ -n "$sys" ] && [ -n "$rom" ] || return 0
+
+    pid="$(state_alive_pid "$sys" "$rom")" || {
+        state_remove "$sys" "$rom"
+        return 0
+    }
+    log "native-stop: ${sys}/${rom} killing producer pid ${pid}"
+    kill "$pid" 2>/dev/null
+    i=0
+    while [ "$i" -lt 20 ] && kill -0 "$pid" 2>/dev/null; do
+        sleep 0.25
+        i=$((i + 1))
+    done
+    if kill -0 "$pid" 2>/dev/null; then
+        kill -9 "$pid" 2>/dev/null
+        log "native-stop: ${sys}/${rom} producer pid ${pid} needed SIGKILL"
+    fi
+    state_remove "$sys" "$rom"
+    return 0
+}
+
+cmd_lookup() {
+    local sys="${1:-}" rom="${2:-}" announce
+    if ! lookup_row "$sys" "$rom"; then
+        printf 'no row for %s / %s\n' "$sys" "$rom"
+        return 0
+    fi
+    announce="${ROW_ANNOUNCE:-$ROW_ROMID}"
+    printf 'system=%s\nrom=%s\nkind=%s\ntarget=%s\nrom_id=%s\nannounce=%s\nds_inside=%s\narch=%s\nenv=%s\nprofile=%s\n' \
+        "$sys" "$rom" "$ROW_KIND" "$ROW_TARGET" "$ROW_ROMID" "$announce" "$ROW_DSINSIDE" "${ROW_ARCH:-64}" "$ROW_ENV" \
+        "$(profile_for "$announce")"
+    return 0
+}
+
+cmd_status() {
+    local line pid
+    printf 'state file: %s\n' "$STATE_FILE"
+    if [ -r "$STATE_FILE" ]; then
+        while IFS= read -r line || [ -n "$line" ]; do
+            [ -n "$line" ] || continue
+            pid="${line##*|}"
+            if kill -0 "$pid" 2>/dev/null; then
+                printf 'running  %s\n' "$line"
+            else
+                printf 'stale    %s\n' "$line"
+            fi
+        done <"$STATE_FILE"
+    fi
+    return 0
+}
+
+# ------------------------------------------------------------------------ main
+
+case "${1:-}" in
+    start)  shift; cmd_start "$@" ;;
+    stop)   shift; cmd_stop "$@" ;;
+    native-start) shift; cmd_native_start "$@" ;;
+    native-stop)  shift; cmd_native_stop "$@" ;;
+    env)    shift; cmd_env "$@" ;;
+    lookup) shift; cmd_lookup "$@" ;;
+    status) cmd_status ;;
+    ""|-h|--help|help) usage ;;
+    *) log "unknown subcommand '${1}'"; usage ;;
+esac
+
+exit 0

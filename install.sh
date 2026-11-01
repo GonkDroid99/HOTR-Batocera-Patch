@@ -6,6 +6,7 @@ MODE="${1:---auto}"
 HOTR=/userdata/system/hotr
 HOTR_DATA=/userdata/system/hook-of-the-reaper
 SINDEN_ENABLE_FILE="$HOTR/sinden-tcp.enabled"
+GUNOUTPUT_ENABLE_FILE="$HOTR/gun-output.enabled"
 SINDEN_PTY_BRIDGE_FILE="$HOTR/sinden-pty-bridge.enabled"
 LOG=/userdata/system/logs/hotr-install.log
 GENROOT="$(printf '%s\n' /usr/lib/python*/site-packages/configgen/generators | sort -V | while read -r candidate; do [ -d "$candidate" ] && printf '%s\n' "$candidate"; done | tail -n1)"
@@ -219,7 +220,46 @@ configure_sinden_pty_bridge() {
   esac
 }
 
-configure_sinden_pty_bridge
+# The gun-output component makes recoil work for the TeknoParrot-family titles whose image does
+# not start DemulShooter itself (see PLAN-gunoutput-shim.md). Opt-in, reversible, and never
+# enabled silently on a first non-interactive install - the same contract as HOTR_SINDEN_TCP.
+configure_gun_output() {
+  local answer=""
+  case "${HOTR_GUN_OUTPUT:-}" in
+    1|yes|YES|true|TRUE|on|ON) answer="y" ;;
+    0|no|NO|false|FALSE|off|OFF) answer="n" ;;
+    *)
+      if [ -t 0 ] && [ -t 1 ]; then
+        printf '[HOTR] Enable the gun-output component (recoil for TeknoParrot-family titles)? [y/N] '
+        IFS= read -r answer || answer=""
+      else
+        [ -f "$GUNOUTPUT_ENABLE_FILE" ] && answer="y" || answer="n"
+      fi
+      ;;
+  esac
+  case "$answer" in
+    y|Y|yes|YES)
+      if [ -x "$BASE/scripts/gun-output-install.sh" ]; then
+        if "$BASE/scripts/gun-output-install.sh" install; then
+          msg "gun-output component enabled."
+        else
+          warn "gun-output component failed to install; see the messages above."
+        fi
+      else
+        warn "gun-output installer missing from this release."
+      fi
+      ;;
+    *)
+      if [ -x "$BASE/scripts/gun-output-install.sh" ]; then
+        "$BASE/scripts/gun-output-install.sh" --revert >/dev/null 2>&1 || true
+      fi
+      rm -f "$GUNOUTPUT_ENABLE_FILE"
+      msg "gun-output component disabled (can be enabled later with HOTR_GUN_OUTPUT=1)."
+      ;;
+  esac
+}
+
+configure_gun_output
 
 extract_any(){
   local file="$1" dest="$2"; mkdir -p "$dest"
@@ -573,6 +613,9 @@ if command -v batocera-services >/dev/null; then batocera-services enable hotr |
 msg "Installation complete."
 if [ -f "$SINDEN_ENABLE_FILE" ]; then
   msg "Sinden recoil is enabled; run hotr-sinden-check (add --fire to pulse one recoil), or hotr-sinden-disable to switch it off."
+fi
+if [ -f "$GUNOUTPUT_ENABLE_FILE" ]; then
+  msg "gun-output is enabled; run $HOTR/tools/gun-output-install.sh --check to verify it (--revert removes it)."
 fi
 [ -x "$HOTR/emulators/duckstation/duckstation-lightgun-qt" ] || warn "DuckStation HOTR binary is missing."
 [ -x "$HOTR/emulators/pcsx2/pcsx2-lightgun-qt" ] || warn "PCSX2 HOTR native binary is missing."

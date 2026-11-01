@@ -543,6 +543,24 @@ class GunChannel:
             )
         return self.gun_owned
 
+    def new_game(self) -> None:
+        """Start the takeover over for a game that reuses the last game's connection.
+
+        HOTR builds whose OpenTCPServerSlot counts every Open_COM (two per game)
+        never drop the connection at game exit, so client_closed never marks the
+        boundary. The next game's Open_COM burst (N8) is then the only sign of
+        it. Once the previous game
+        has decided who kicks, dropping the ownership makes dispatch retake the
+        gun, so its F18b guard cannot swallow the new game's ammo-mode kicks.
+        """
+        if self.gun_owned and self.kick_mode != "unknown":
+            self.gun_owned = False
+            logging.info(
+                "player %s: new game on the same HOTR connection; taking %s over again",
+                self.player,
+                self.device_path,
+            )
+
     def release_gun(self) -> None:
         """Hand the gun back to the tracker's own recoil until the next game."""
         if not self.gun_owned:
@@ -1030,6 +1048,8 @@ class Broker:
                 except OSError:
                     logging.warning("worker for player %s is unavailable", player)
             elif channel:
+                if command[:1] == "N":
+                    channel.new_game()   # Open_COM: the only game-start marker HOTR sends
                 if self.active_players.get(player) and not channel.gun_owned:
                     # A tracker restart or a replug re-programmed the gun, which
                     # drops the override; it belongs to the live session, so put
