@@ -27,7 +27,16 @@ export PATH
 ROOT="${GUNOUTPUT_ROOT:-}"
 MARK_START="# >>> HOTR-GUNOUTPUT-HOOK v1 >>>"
 MARK_END="# <<< HOTR-GUNOUTPUT-HOOK v1 <<<"
-TARGET="${ROOT}/usr/lib/python3.12/site-packages/configgen/generators/Generator.py"
+# configgen lives under /usr/lib/python3.X/site-packages; the version differs between Batocera
+# releases (43 ships 3.12, 44 moved on), so resolve it instead of pinning one.
+_pygen() {
+    local f
+    for f in "${ROOT}"/usr/lib/python3*/site-packages/configgen/generators/Generator.py; do
+        [ -f "$f" ] && { printf '%s' "$f"; return 0; }
+    done
+    printf '%s' "${ROOT}/usr/lib/python3.12/site-packages/configgen/generators/Generator.py"
+}
+TARGET="${GUNOUTPUT_GENERATOR:-$(_pygen)}"
 BACKUP_DIR="${ROOT}/userdata/system/hotr/backups"
 ANCHOR="        return nullcontext()"
 SAVE_OVERLAY=1

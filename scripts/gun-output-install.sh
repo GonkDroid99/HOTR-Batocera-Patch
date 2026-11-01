@@ -40,7 +40,14 @@ PATCHER="$BASE/scripts/patch-batocera-wine-gunoutput.sh"
 # Native emulators (Flycast today) never run through batocera-wine, so their producer is started
 # from configgen's Generator.running() instead - that is what this second patcher installs.
 PATCHER_GEN="$BASE/scripts/patch-configgen-gunoutput.sh"
-GENERATOR="$ROOT/usr/lib/python3.12/site-packages/configgen/generators/Generator.py"
+# configgen lives under /usr/lib/python3.X/site-packages; the version differs between Batocera
+# releases, so resolve the first Generator.py that exists rather than pinning one.
+GENERATOR=""
+for _gen in "$ROOT"/usr/lib/python3*/site-packages/configgen/generators/Generator.py; do
+    [ -f "$_gen" ] && { GENERATOR="$_gen"; break; }
+done
+[ -n "$GENERATOR" ] || GENERATOR="$ROOT/usr/lib/python3.12/site-packages/configgen/generators/Generator.py"
+export GUNOUTPUT_GENERATOR="$GENERATOR"
 LAUNCHER="$ROOT/usr/bin/batocera-wine"
 READER="$HOTR/tools/flycast-outputs.py"
 # The community "RGS" layer ships its own copy of the launcher plus a boot service that copies it

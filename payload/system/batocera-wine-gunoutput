@@ -149,6 +149,23 @@ profile_for() {
     return 0
 }
 
+# True when this disk is booted inside a VM. The test-VM arrangement installs Venus (virtio-gpu)
+# and lavapipe (software) Vulkan ICDs under /userdata, and those files travel with the disk. Forcing
+# them via VK_ICD_FILENAMES on real hardware would hide the GPU's own driver and drop DXVK onto the
+# CPU renderer, so the export happens only where the VM ICDs actually make sense.
+running_in_vm() {
+    local v
+    for v in /sys/bus/pci/devices/*/vendor; do
+        [ -r "$v" ] || continue
+        [ "$(cat "$v" 2>/dev/null)" = "0x1af4" ] && return 0
+    done
+    grep -qE '^virtio_gpu' /proc/modules 2>/dev/null && return 0
+    case "$(cat /sys/class/dmi/id/sys_vendor 2>/dev/null)" in
+        QEMU | KVM | "Red Hat" | innotek* | "Microsoft Corporation") return 0 ;;
+    esac
+    return 1
+}
+
 # The *game* environment. Printed as shell assignments for the patcher's hook to eval, because a
 # child process cannot export into its parent - this is how TP_REMOTETHREAD reaches the game
 # loader without editing every image's autorun.cmd.
@@ -166,13 +183,15 @@ cmd_env() {
     # OpenParrot launch dies with "Failed to run the process".
     printf 'export TP_REMOTETHREAD=1\n'
 
-    # VM-only software/venus Vulkan ICDs: only when the files really exist, so a real machine
-    # keeps its own driver selection untouched.
-    for f in "${ICD_DIR}/venus_icd.x86_64.json" "${ICD_DIR}/lvp_icd.x86_64.json"; do
-        [ -f "$f" ] && icd_list="${icd_list:+${icd_list}:}${f}"
-    done
-    if [ -n "$icd_list" ]; then
-        printf 'export VK_ICD_FILENAMES="%s"\n' "$icd_list"
+    # VM-only software/venus Vulkan ICDs: only on a VM, and only when the files really exist, so a
+    # real machine keeps its own driver selection untouched.
+    if running_in_vm; then
+        for f in "${ICD_DIR}/venus_icd.x86_64.json" "${ICD_DIR}/lvp_icd.x86_64.json"; do
+            [ -f "$f" ] && icd_list="${icd_list:+${icd_list}:}${f}"
+        done
+        if [ -n "$icd_list" ]; then
+            printf 'export VK_ICD_FILENAMES="%s"\n' "$icd_list"
+        fi
     fi
 
     # optional per-row extras, validated to KEY=VALUE only

@@ -47,4 +47,3 @@ openwiki/*
 .github/workflows/openwiki-update.yml
 AGENTS.md
 .pi/*
-payload/hotr/gun-output.tsv
